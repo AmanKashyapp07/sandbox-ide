@@ -7,12 +7,13 @@ import { MonacoBinding } from 'y-monaco';
 
 interface CodeEditorProps {
   workspaceId: string;
+  fileId: string;
   language: string;
   onCodeChange?: (code: string) => void;
   onEditorReady?: (editor: any) => void;
 }
 
-export default function CodeEditor({ workspaceId, language, onCodeChange, onEditorReady }: CodeEditorProps) {
+export default function CodeEditor({ workspaceId, fileId, language, onCodeChange, onEditorReady }: CodeEditorProps) {
   const editorRef = useRef<any>(null);
   const [provider, setProvider] = useState<WebsocketProvider | null>(null);
   const ydocRef = useRef(new Y.Doc());
@@ -21,9 +22,10 @@ export default function CodeEditor({ workspaceId, language, onCodeChange, onEdit
     const ydoc = ydocRef.current;
     
     // Connect to Yjs WebSocket server
+    const roomName = `${workspaceId}-${fileId}`;
     const wsProvider = new WebsocketProvider(
       'ws://localhost:4000',
-      workspaceId,
+      roomName,
       ydoc
     );
 
@@ -38,7 +40,7 @@ export default function CodeEditor({ workspaceId, language, onCodeChange, onEdit
       wsProvider.destroy();
       ydoc.destroy();
     };
-  }, [workspaceId]);
+  }, [workspaceId, fileId]);
 
   const handleEditorDidMount = (editor: any) => {
     editorRef.current = editor;
