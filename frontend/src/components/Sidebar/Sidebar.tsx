@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileCode, Folder, Plus, Trash2, ChevronRight, ChevronDown } from 'lucide-react';
+import { FileCode, Plus, Trash2 } from 'lucide-react';
 
 export interface AppFile {
   id: string;
@@ -25,7 +25,6 @@ export default function Sidebar({ files, activeFileId, onFileSelect, onFileCreat
     e.preventDefault();
     if (!newFileName.trim()) return;
 
-    // determine language from extension
     let lang = 'javascript';
     if (newFileName.endsWith('.py')) lang = 'python';
     else if (newFileName.endsWith('.cpp')) lang = 'cpp';
@@ -37,21 +36,21 @@ export default function Sidebar({ files, activeFileId, onFileSelect, onFileCreat
   };
 
   return (
-    <div className="w-64 h-full bg-[#0d1117] border-r border-[#30363d] flex flex-col text-[#c9d1d9]">
-      <div className="px-4 py-3 border-b border-[#30363d] flex items-center justify-between">
-        <span className="text-sm font-semibold text-[#c9d1d9]">EXPLORER</span>
+    <div className="w-64 h-full bg-zinc-950 border-r border-zinc-800 flex flex-col">
+      <div className="px-5 py-4 border-b border-zinc-800/80 flex items-center justify-between">
+        <span className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">Explorer</span>
         <button 
           onClick={() => setIsCreating(true)}
-          className="text-[#8b949e] hover:text-white transition-colors"
+          className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           title="New File"
         >
           <Plus size={16} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
         {isCreating && (
-          <div className="px-4 py-1">
+          <div className="px-2 pb-2">
             <form onSubmit={handleCreate}>
               <input
                 autoFocus
@@ -60,7 +59,7 @@ export default function Sidebar({ files, activeFileId, onFileSelect, onFileCreat
                 onChange={(e) => setNewFileName(e.target.value)}
                 onBlur={() => setIsCreating(false)}
                 placeholder="filename.js"
-                className="w-full bg-[#21262d] border border-[#30363d] text-[#c9d1d9] text-sm rounded-md px-2 py-1 focus:outline-none focus:border-blue-500"
+                className="w-full bg-zinc-900 border border-indigo-500/50 text-zinc-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 shadow-sm transition-all"
               />
             </form>
           </div>
@@ -70,13 +69,15 @@ export default function Sidebar({ files, activeFileId, onFileSelect, onFileCreat
           <div 
             key={file.id}
             onClick={() => onFileSelect(file)}
-            className={`group flex items-center justify-between px-4 py-1.5 cursor-pointer text-sm ${
-              activeFileId === file.id ? 'bg-[#21262d] text-white' : 'text-[#8b949e] hover:bg-[#161b22] hover:text-[#c9d1d9]'
+            className={`group flex items-center justify-between px-3 py-2 cursor-pointer text-sm rounded-lg transition-colors ${
+              activeFileId === file.id 
+                ? 'bg-indigo-500/10 text-indigo-400 font-medium' 
+                : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <FileCode size={16} className={activeFileId === file.id ? 'text-[#58a6ff]' : 'text-[#8b949e]'} />
-              <span>{file.name}</span>
+            <div className="flex items-center gap-2.5">
+              <FileCode size={16} className={activeFileId === file.id ? 'text-indigo-400' : 'text-zinc-500 group-hover:text-zinc-400'} />
+              <span className="truncate">{file.name}</span>
             </div>
             
             <button
@@ -84,7 +85,8 @@ export default function Sidebar({ files, activeFileId, onFileSelect, onFileCreat
                 e.stopPropagation();
                 onFileDelete(file.id);
               }}
-              className="opacity-0 group-hover:opacity-100 text-[#8b949e] hover:text-[#ff7b72] transition-colors"
+              className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-colors p-1 rounded-md hover:bg-red-500/10"
+              title="Delete File"
             >
               <Trash2 size={14} />
             </button>

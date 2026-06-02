@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import CodeEditor from '../components/Editor/CodeEditor';
 import OutputPanel from '../components/Terminal/OutputPanel';
 import Sidebar, { type AppFile } from '../components/Sidebar/Sidebar';
-import { Play, Cloud, Users, Book, LogOut } from 'lucide-react';
+import { Play, Cloud, Users, Book, LogOut, Loader2 } from 'lucide-react';
 
 function IdePage() {
   const [isExecuting, setIsExecuting] = useState(false);
@@ -27,7 +27,6 @@ function IdePage() {
       }
       
       try {
-        // 1. Fetch User
         const userRes = await fetch('http://localhost:4000/api/auth/me', {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -41,14 +40,12 @@ function IdePage() {
         const userData = await userRes.json();
         setUser(userData.user);
 
-        // 2. Fetch/Create Default Workspace
         const wsRes = await fetch('http://localhost:4000/api/workspace/default', {
           headers: { Authorization: `Bearer ${token}` }
         });
         const wsData = await wsRes.json();
         setWorkspaceId(wsData.id);
 
-        // 3. Fetch Files
         const filesRes = await fetch(`http://localhost:4000/api/workspace/${wsData.id}/files`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -142,43 +139,50 @@ function IdePage() {
   };
 
   if (!user || !workspaceId) {
-    return <div className="h-screen w-full bg-[#0d1117] flex items-center justify-center text-white">Loading IDE...</div>;
+    return (
+      <div className="h-screen w-full bg-zinc-950 flex flex-col items-center justify-center text-zinc-400">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-500 mb-4" />
+        <p>Initializing your workspace...</p>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col h-screen w-full bg-[#0d1117] text-[#c9d1d9] font-sans">
-      {/* GitHub-style Header */}
-      <header className="flex items-center justify-between px-4 py-3 bg-[#161b22] text-[#c9d1d9] border-b border-[#30363d]">
-        <div className="flex items-center gap-3">
-          <Cloud className="text-white" size={32} />
-          <div className="flex items-center text-sm font-semibold">
-            <span className="text-[#8b949e] hover:text-blue-400 cursor-pointer transition-colors">{user.username}</span>
-            <span className="mx-1 text-[#8b949e]">/</span>
-            <span className="hover:text-blue-400 cursor-pointer transition-colors text-white">sandbox-ide</span>
-            <span className="ml-2 px-2 py-0.5 text-xs font-medium border border-[#30363d] rounded-full text-[#8b949e]">Public</span>
+    <div className="flex flex-col h-screen w-full bg-zinc-950 text-zinc-300 font-sans selection:bg-indigo-500/30">
+      {/* Top Navbar */}
+      <header className="flex items-center justify-between px-5 py-3 bg-zinc-950 border-b border-zinc-800 z-10">
+        <div className="flex items-center gap-4">
+          <div className="h-8 w-8 bg-indigo-500/10 rounded-lg border border-indigo-500/20 flex items-center justify-center">
+            <Cloud className="text-indigo-400" size={18} />
+          </div>
+          <div className="flex items-center text-sm font-medium">
+            <span className="text-zinc-500 hover:text-zinc-300 cursor-pointer transition-colors">{user.username}</span>
+            <span className="mx-2 text-zinc-600">/</span>
+            <span className="hover:text-white cursor-pointer transition-colors text-zinc-100 font-semibold">sandbox-ide</span>
+            <span className="ml-3 px-2 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-zinc-900 border border-zinc-800 rounded-full text-zinc-400">
+              Public
+            </span>
           </div>
         </div>
         
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1 bg-[#21262d] hover:bg-[#30363d] cursor-pointer rounded-md text-xs font-medium transition-colors border border-[#30363d]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 cursor-pointer rounded-lg text-xs font-medium transition-colors border border-zinc-800">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            <Users size={14} className="text-[#8b949e]" />
-            Live Sync
+            <Users size={14} className="text-zinc-400" />
+            <span className="text-zinc-300">Live Sync</span>
           </div>
-          <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-1 hover:bg-[#30363d] cursor-pointer rounded-md text-xs font-medium transition-colors border border-transparent hover:border-[#30363d] text-[#f85149]">
+          <button onClick={handleLogout} className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-500/10 cursor-pointer rounded-lg text-xs font-medium transition-colors text-zinc-400 hover:text-red-400">
             <LogOut size={14} />
             Logout
           </button>
         </div>
       </header>
 
-      {/* Main Layout (Sidebar + Editor + Terminal) */}
+      {/* Main Content Area */}
       <div className="flex flex-1 overflow-hidden">
-        
-        {/* Sidebar */}
         <Sidebar 
           files={files}
           activeFileId={activeFile?.id || null}
@@ -187,42 +191,45 @@ function IdePage() {
           onFileDelete={handleFileDelete}
         />
 
-        {/* Workspace Area */}
-        <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Toolbar */}
-          <div className="flex items-center justify-between px-6 py-3 bg-[#0d1117] border-b border-[#30363d]">
-            <div className="flex items-center gap-2 text-sm">
-              <Book size={16} className="text-[#8b949e]" />
-              <span className="font-semibold text-[#c9d1d9]">{activeFile?.name || 'No file selected'}</span>
+        {/* Editor & Terminal Section */}
+        <div className="flex flex-col flex-1 overflow-hidden bg-[#09090b]">
+          
+          {/* File Toolbar */}
+          <div className="flex items-center justify-between px-6 py-3 bg-zinc-950 border-b border-zinc-800/80">
+            <div className="flex items-center gap-2.5 text-sm">
+              <Book size={16} className="text-zinc-500" />
+              <span className="font-medium text-zinc-200">{activeFile?.name || 'No file selected'}</span>
             </div>
             
             {activeFile && (
-              <div className="flex items-center gap-3">
-                <div className="px-3 py-1.5 text-sm font-medium text-[#8b949e] bg-[#21262d] border border-[#30363d] rounded-md">
-                  {activeFile.language}
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                   <div className="w-2 h-2 rounded-full bg-zinc-600"></div>
+                   <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{activeFile.language}</span>
                 </div>
                 
                 <button 
                   onClick={handleExecute}
                   disabled={isExecuting}
-                  className="flex items-center gap-2 bg-[#238636] hover:bg-[#2ea043] border border-[rgba(240,246,252,0.1)] text-white px-3 py-1.5 rounded-md font-medium text-sm transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg font-medium text-sm transition-all shadow-[0_0_15px_rgba(99,102,241,0.15)] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Play size={14} fill="currentColor" />
+                  {isExecuting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
                   {isExecuting ? 'Running...' : 'Run Code'}
                 </button>
               </div>
             )}
           </div>
 
-          <main className="flex-1 flex gap-4 p-6 overflow-hidden">
-            <div className="flex-1 h-full bg-[#0d1117] border border-[#30363d] rounded-md shadow-sm overflow-hidden flex flex-col">
-              <div className="bg-[#161b22] border-b border-[#30363d] px-4 py-2 text-xs font-semibold text-[#8b949e]">
-                Code Editor
+          <main className="flex-1 flex gap-4 p-4 overflow-hidden">
+            {/* Editor Panel */}
+            <div className="flex-1 h-full bg-zinc-950 border border-zinc-800/80 rounded-xl overflow-hidden flex flex-col shadow-sm">
+              <div className="bg-zinc-900/50 border-b border-zinc-800/80 px-4 py-2.5 text-[11px] font-semibold text-zinc-400 uppercase tracking-widest">
+                Editor
               </div>
-              <div className="flex-1">
+              <div className="flex-1 bg-zinc-950">
                 {activeFile ? (
                   <CodeEditor 
-                    key={activeFile.id} // Re-mount Yjs provider on file switch
+                    key={activeFile.id}
                     workspaceId={workspaceId} 
                     fileId={activeFile.id}
                     language={activeFile.language}
@@ -231,18 +238,20 @@ function IdePage() {
                     onEditorReady={(editor) => editorRef.current = editor}
                   />
                 ) : (
-                  <div className="h-full flex items-center justify-center text-[#8b949e] text-sm">
-                    Select or create a file to start coding.
+                  <div className="h-full flex flex-col items-center justify-center text-zinc-500 text-sm gap-3">
+                    <Cloud className="w-12 h-12 opacity-20" />
+                    <p>Select or create a file to start coding.</p>
                   </div>
                 )}
               </div>
             </div>
             
-            <div className="w-[40%] h-full bg-[#0d1117] border border-[#30363d] rounded-md shadow-sm overflow-hidden flex flex-col">
-              <div className="bg-[#161b22] border-b border-[#30363d] px-4 py-2 text-xs font-semibold text-[#8b949e]">
+            {/* Terminal Panel */}
+            <div className="w-[40%] h-full bg-[#0a0a0a] border border-zinc-800/80 rounded-xl overflow-hidden flex flex-col shadow-sm">
+              <div className="bg-zinc-900/50 border-b border-zinc-800/80 px-4 py-2.5 text-[11px] font-semibold text-zinc-400 uppercase tracking-widest">
                 Terminal
               </div>
-              <div className="flex-1 bg-[#0d1117]">
+              <div className="flex-1">
                 <OutputPanel output={fileOutputs[activeFile?.id || ''] || ''} isExecuting={isExecuting} />
               </div>
             </div>

@@ -44,25 +44,31 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d1117] flex flex-col items-center justify-center py-12 sm:px-6 lg:px-8 text-[#c9d1d9] font-sans">
+    <div className="min-h-screen bg-zinc-950 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-900 via-zinc-950 to-zinc-950 flex flex-col items-center justify-center py-12 sm:px-6 lg:px-8 text-zinc-300 font-sans selection:bg-indigo-500/30">
       <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center">
-        <Cloud size={48} className="text-white mb-6" />
-        <h2 className="text-center text-2xl font-semibold tracking-tight text-white">
-          {isLogin ? 'Sign in to Sandbox IDE' : 'Create your account'}
+        <div className="h-16 w-16 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(99,102,241,0.1)]">
+          <Cloud size={32} className="text-indigo-400" />
+        </div>
+        <h2 className="text-center text-3xl font-semibold tracking-tight text-white">
+          {isLogin ? 'Welcome back' : 'Create your account'}
         </h2>
+        <p className="mt-2 text-center text-sm text-zinc-400">
+          {isLogin ? 'Sign in to access your workspaces' : 'Join to start building in the cloud'}
+        </p>
       </div>
 
-      <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-[20rem]">
-        <div className="bg-[#161b22] py-6 px-4 shadow rounded-lg border border-[#30363d] sm:px-6">
-          <form className="space-y-4" onSubmit={handleSubmit}>
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-[22rem]">
+        <div className="bg-zinc-900/50 backdrop-blur-xl py-8 px-4 shadow-2xl rounded-2xl border border-zinc-800/50 sm:px-10">
+          <form className="space-y-5" onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-[rgba(248,81,73,0.1)] border border-[rgba(248,81,73,0.4)] text-[#ff7b72] px-3 py-2 rounded-md text-sm">
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
                 {error}
               </div>
             )}
             
             <div>
-              <label className="block text-sm font-medium text-[#c9d1d9] mb-1">
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">
                 Username
               </label>
               <input
@@ -70,13 +76,14 @@ export default function AuthPage() {
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="appearance-none block w-full px-3 py-1.5 border border-[#30363d] rounded-md shadow-sm placeholder-[#8b949e] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-[#0d1117] text-white sm:text-sm"
+                className="appearance-none block w-full px-4 py-2.5 border border-zinc-700/50 rounded-xl shadow-sm placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-zinc-950 text-white sm:text-sm transition-colors"
+                placeholder="johndoe"
               />
             </div>
 
             {!isLogin && (
               <div>
-                <label className="block text-sm font-medium text-[#c9d1d9] mb-1">
+                <label className="block text-sm font-medium text-zinc-300 mb-1.5">
                   Email address
                 </label>
                 <input
@@ -84,13 +91,14 @@ export default function AuthPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="appearance-none block w-full px-3 py-1.5 border border-[#30363d] rounded-md shadow-sm placeholder-[#8b949e] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-[#0d1117] text-white sm:text-sm"
+                  className="appearance-none block w-full px-4 py-2.5 border border-zinc-700/50 rounded-xl shadow-sm placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-zinc-950 text-white sm:text-sm transition-colors"
+                  placeholder="you@example.com"
                 />
               </div>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-[#c9d1d9] mb-1">
+              <label className="block text-sm font-medium text-zinc-300 mb-1.5">
                 Password
               </label>
               <input
@@ -98,35 +106,36 @@ export default function AuthPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="appearance-none block w-full px-3 py-1.5 border border-[#30363d] rounded-md shadow-sm placeholder-[#8b949e] focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-[#0d1117] text-white sm:text-sm"
+                className="appearance-none block w-full px-4 py-2.5 border border-zinc-700/50 rounded-xl shadow-sm placeholder-zinc-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-zinc-950 text-white sm:text-sm transition-colors"
+                placeholder="••••••••"
               />
             </div>
 
-            <div>
+            <div className="pt-2">
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full flex justify-center py-2 px-4 border border-[rgba(240,246,252,0.1)] rounded-md shadow-sm text-sm font-medium text-white bg-[#238636] hover:bg-[#2ea043] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#2ea043] disabled:opacity-50"
+                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-xl shadow-[0_0_15px_rgba(99,102,241,0.2)] text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:ring-indigo-500 disabled:opacity-50 transition-all duration-200"
               >
                 {isLoading ? 'Processing...' : isLogin ? 'Sign in' : 'Sign up'}
               </button>
             </div>
           </form>
-        </div>
-        
-        <div className="mt-6 text-center border border-[#30363d] rounded-lg bg-[#161b22] px-4 py-4">
-          <p className="text-sm text-[#8b949e]">
-            {isLogin ? 'New to Sandbox IDE?' : 'Already have an account?'}{' '}
-            <button
-              onClick={() => {
-                setIsLogin(!isLogin);
-                setError('');
-              }}
-              className="font-medium text-[#58a6ff] hover:text-blue-400 focus:outline-none"
-            >
-              {isLogin ? 'Create an account' : 'Sign in'}
-            </button>
-          </p>
+
+          <div className="mt-8 text-center">
+            <p className="text-sm text-zinc-400">
+              {isLogin ? "Don't have an account?" : 'Already have an account?'}{' '}
+              <button
+                onClick={() => {
+                  setIsLogin(!isLogin);
+                  setError('');
+                }}
+                className="font-medium text-indigo-400 hover:text-indigo-300 transition-colors focus:outline-none"
+              >
+                {isLogin ? 'Create one now' : 'Sign in instead'}
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     </div>
