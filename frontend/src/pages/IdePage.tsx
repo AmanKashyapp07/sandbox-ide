@@ -148,7 +148,6 @@ function IdePage() {
     const code = editorRef.current.getValue();
 
     setIsExecuting(true);
-    setFileOutputs((prev) => ({ ...prev, [activeFile.id]: 'Running...' }));
 
     try {
       const token = localStorage.getItem('token');

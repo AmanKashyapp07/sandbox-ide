@@ -1,4 +1,4 @@
-import { TerminalSquare, Activity } from 'lucide-react';
+import { TerminalSquare, Loader2 } from 'lucide-react';
 
 interface OutputPanelProps {
   output: string;
@@ -7,14 +7,14 @@ interface OutputPanelProps {
 
 export default function OutputPanel({ output, isExecuting }: OutputPanelProps) {
   return (
-    <div className="flex h-full flex-col bg-[#07080a] text-zinc-300">
+    <div className="relative flex h-full flex-col overflow-hidden bg-[#07080a] text-zinc-300">
       {isExecuting && (
-        <div className="flex items-center gap-2.5 border-b border-cyan-400/10 bg-cyan-400/5 px-4 py-2.5 text-xs font-medium text-cyan-300">
-          <Activity size={14} className="animate-pulse" />
-          <span>Executing code locally...</span>
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-[#07080a]/60 backdrop-blur-[2px] transition-all">
+          <Loader2 size={36} className="animate-spin text-cyan-400" />
+          <span className="animate-pulse font-sans text-sm font-medium tracking-wide text-cyan-300">Executing code in sandbox...</span>
         </div>
       )}
-      <div className="flex-1 overflow-y-auto p-5 font-mono text-[13px] leading-relaxed tracking-wide whitespace-pre-wrap">
+      <div className={`flex-1 overflow-y-auto p-5 font-mono text-[13px] leading-relaxed tracking-wide whitespace-pre-wrap transition-all duration-300 ${isExecuting ? 'opacity-30' : 'opacity-100'}`}>
         {output ? (
           <span className={output.includes('[Error]') || output.includes('Error:') ? 'text-red-400' : 'text-zinc-300'}>
             {output}
@@ -22,7 +22,7 @@ export default function OutputPanel({ output, isExecuting }: OutputPanelProps) {
         ) : (
           <div className="mt-10 flex h-full flex-col items-center justify-center gap-3 text-zinc-500/60">
             <TerminalSquare size={36} className="opacity-80" strokeWidth={1.5} />
-            <p className="italic font-sans text-sm">Output will appear here after execution</p>
+            <p className="font-sans text-sm italic">Output will appear here after execution</p>
           </div>
         )}
       </div>
