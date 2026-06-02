@@ -42,12 +42,9 @@ export default function CodeEditor({ workspaceId, fileId, language, initialConte
       wsProvider.awareness
     );
 
-    // Wait for initial sync with the server before injecting local cache to avoid duplicates
-    wsProvider.on('sync', (isSynced: boolean) => {
-      if (isSynced && type.length === 0 && initialContent) {
-        type.insert(0, initialContent);
-      }
-    });
+    // The backend now handles loading the initial state from the database.
+    // We no longer need to manually inject initialContent here, doing so 
+    // causes duplication when the server loads state asynchronously.
 
     return () => {
       binding.destroy();
