@@ -1,17 +1,17 @@
 # Collaborative Cloud IDE & Sandbox
 
-A production-oriented collaborative cloud IDE and sandbox built with React, Vite, Express, PostgreSQL, Yjs, and WebSockets. The project is being developed in weekly milestones, and **Week 1 is complete**.
+A production-oriented collaborative cloud IDE and sandbox built with React, Vite, Express, PostgreSQL, Yjs, and WebSockets. The project is being developed in weekly milestones, and **Week 2 is complete**.
 
 ## Current Status
 
-Week 1 delivered the core foundation:
+Week 2 delivered the core collaboration and offline editing features:
 
-- Auth flow for login and registration
-- Polished IDE and auth UI
-- Workspace shell with file explorer, editor, and terminal panels
-- PostgreSQL schema for users, workspaces, files, and execution history
-- Local code execution support for multiple languages
-- Yjs collaboration groundwork and WebSocket integration
+- **Real-Time Collaboration:** Full CRDT-based multi-user sync using Yjs, `y-websocket`, and `y-monaco`.
+- **Live User Awareness:** Remote cursor tracking and selection sharing with dynamic user color tags and tooltips.
+- **Durable Yjs Persistence:** Automatic, debounced binary `yjs_state` and plaintext document sync to the PostgreSQL database on file updates.
+- **Offline Editing:** Seamless local persistence using IndexedDB (`y-indexeddb`) when connection is lost, automatically merging changes on reconnection.
+- **Connection Status UI:** Live status indicator showing `Live Sync` (Connected), `Connecting...`, or `Offline` states.
+- **Enhanced Directory & UI:** Breadcrumb folder path navigation, nested directory structuring, and inline folder/file creation in the explorer.
 
 This README is a living document and will be updated as the project moves through later weeks.
 
@@ -19,7 +19,7 @@ This README is a living document and will be updated as the project moves throug
 
 - Frontend: React, Vite, TypeScript, Tailwind CSS
 - Editor: Monaco Editor
-- Collaboration: Yjs, y-websocket, WebSockets
+- Collaboration: Yjs, y-websocket, y-monaco, y-indexeddb
 - Backend: Node.js, Express, TypeScript
 - Database: PostgreSQL
 - Sandbox: Local execution for now, with Docker-based isolation planned next
@@ -31,17 +31,15 @@ This README is a living document and will be updated as the project moves throug
 - `database/` - PostgreSQL schema and initialization scripts
 - `reports/` - Architecture notes, week summaries, and roadmap documents
 
-## Week 1 Highlights
+## Week 2 Highlights
 
-- Built the base UI for the auth page and IDE page
-- Added a workspace layout with sidebar, editor, and terminal areas
-- Defined the relational database schema for core entities
-- Set up backend routes for authentication and workspace management
-- Added the first working code execution flow
+- Added fully synchronized editing sessions via WebSockets.
+- Created custom Monaco extensions to render active collaborator cursors and name badges.
+- Configured IndexedDB offline backups so user edits are safe even during network drops.
+- Polished the explorer and workspace UI with fluid inputs, transitions, and breadcrumbs.
 
 ## Next Milestones
 
-- Week 2: Real-time collaboration and durable Yjs persistence
 - Week 3: Docker-based sandbox isolation and execution hardening
 - Week 4: Polish, deployment, and interview prep
 
@@ -71,6 +69,6 @@ Use the SQL in `database/schema.sql` and the docker setup in `docker-compose.yml
 
 ## Notes
 
-- The IDE route is available at `/ide`.
-- The login page redirects authenticated users to the IDE.
-- The reports in `reports/` document the design decisions and the Week 1 foundation.
+- The dashboard is located at `/dashboard`.
+- The IDE is located at `/ide/:workspaceId/:fileId`.
+- Documents and guides for Week 1 & 2 are placed in `reports/`.
