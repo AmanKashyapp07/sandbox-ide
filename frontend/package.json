@@ -16,6 +16,7 @@
     "react-dom": "^19.2.6",
     "react-router-dom": "^7.16.0",
     "socket.io-client": "^4.8.3",
+    "y-indexeddb": "^9.0.12",
     "y-monaco": "^0.1.6",
     "y-websocket": "^1.5.0",
     "yjs": "^13.6.31"

@@ -11,7 +11,7 @@ interface Workspace {
 
 export default function DashboardPage() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [user, setUser] = useState<{username: string, id: string} | null>(null);
+  const [user, setUser] = useState<{ username: string, id: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -27,18 +27,18 @@ export default function DashboardPage() {
         navigate('/login');
         return;
       }
-      
+
       try {
         const userRes = await fetch('http://localhost:4000/api/auth/me', {
           headers: { Authorization: `Bearer ${token}` }
         });
-        
+
         if (!userRes.ok) {
           localStorage.removeItem('token');
           navigate('/login');
           return;
         }
-        
+
         const userData = await userRes.json();
         setUser(userData.user);
 
@@ -64,13 +64,13 @@ export default function DashboardPage() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
-    
+
     setIsCreating(true);
     try {
       const token = localStorage.getItem('token');
       const res = await fetch('http://localhost:4000/api/workspace', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
@@ -96,7 +96,7 @@ export default function DashboardPage() {
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm('Are you sure you want to delete this workspace?')) return;
-    
+
     try {
       const token = localStorage.getItem('token');
       const res = await fetch(`http://localhost:4000/api/workspace/${id}`, {
@@ -190,7 +190,7 @@ export default function DashboardPage() {
                 Your Workspaces
               </h2>
             </div>
-            
+
             {workspaces.length === 0 ? (
               <div className="rounded-[2rem] border border-white/5 bg-white/[0.02] p-12 text-center border-dashed backdrop-blur-sm">
                 <FolderCode size={40} className="mx-auto text-zinc-600 mb-4 opacity-50" />
@@ -200,7 +200,7 @@ export default function DashboardPage() {
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
                 {workspaces.map(ws => (
-                  <div 
+                  <div
                     key={ws.id}
                     onClick={() => {
                       if (editingWorkspaceId !== ws.id) navigate(`/ide/${ws.id}`);
@@ -210,7 +210,7 @@ export default function DashboardPage() {
                     <div className="flex items-start justify-between min-h-[2rem]">
                       {editingWorkspaceId === ws.id ? (
                         <form className="flex w-full items-center gap-2" onSubmit={(e) => handleEditSave(e, ws.id)}>
-                          <input 
+                          <input
                             autoFocus
                             type="text"
                             value={editingTitle}
@@ -228,18 +228,18 @@ export default function DashboardPage() {
                       ) : (
                         <>
                           <h3 className="text-lg font-medium text-zinc-100 group-hover:text-cyan-100 transition-colors pr-16">{ws.title}</h3>
-                          
+
                           <div className="absolute right-4 top-4 flex opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                            <button 
+                            <button
                               onClick={(e) => handleEditStart(e, ws.id, ws.title)}
-                              className="rounded-lg p-1.5 text-zinc-400 hover:bg-white/10 hover:text-cyan-300"
+                              className="cursor-pointer rounded-lg p-1.5 text-zinc-400 hover:bg-white/10 hover:text-cyan-300"
                               title="Edit Title"
                             >
                               <Edit2 size={16} />
                             </button>
-                            <button 
+                            <button
                               onClick={(e) => handleDelete(e, ws.id)}
-                              className="rounded-lg p-1.5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400"
+                              className="cursor-pointer rounded-lg p-1.5 text-zinc-400 hover:bg-red-500/20 hover:text-red-400"
                               title="Delete Workspace"
                             >
                               <Trash2 size={16} />

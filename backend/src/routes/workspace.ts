@@ -59,7 +59,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         if (result.rows.length > 0) {
           await getPool().query(
             `INSERT INTO files (workspace_id, name, type, language, content) VALUES ($1, $2, $3, $4, $5)`,
-            [result.rows[0].id, 'index.js', 'file', 'javascript', '// Welcome to your new workspace!\nconsole.log("Hello World");']
+            [result.rows[0].id, 'index.js', 'file', 'javascript', '']
           );
         }
       }
@@ -136,7 +136,7 @@ router.get('/default', async (req: AuthRequest, res: Response): Promise<void> =>
       // Create a default index.js file
       await getPool().query(
         `INSERT INTO files (workspace_id, name, type, language, content) VALUES ($1, $2, $3, $4, $5)`,
-        [wsResult.rows[0].id, 'index.js', 'file', 'javascript', '// Welcome to your new sandbox!\nconsole.log("Hello World");']
+        [wsResult.rows[0].id, 'index.js', 'file', 'javascript', '']
       );
     }
     res.json(wsResult.rows[0]);

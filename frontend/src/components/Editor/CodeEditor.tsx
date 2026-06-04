@@ -4,6 +4,8 @@ import * as Y from 'yjs';
 // @ts-ignore
 import { WebsocketProvider } from 'y-websocket';
 import { MonacoBinding } from 'y-monaco';
+import { IndexeddbPersistence } from 'y-indexeddb';
+
 
 interface CodeEditorProps {
   workspaceId: string;
@@ -13,6 +15,7 @@ interface CodeEditorProps {
   onCodeChange?: (code: string) => void;
   onEditorReady?: (editor: any) => void;
   onAwarenessChange?: (users: any[]) => void;
+  onConnectionStatusChange?: (status: 'connected' | 'disconnected' | 'connecting') => void;
 }
 
 const COLORS = [
@@ -34,7 +37,7 @@ const getUserColor = (username: string) => {
   return COLORS[Math.abs(hash) % COLORS.length];
 };
 
-export default function CodeEditor({ workspaceId, fileId, language, currentUser, onCodeChange, onEditorReady, onAwarenessChange }: CodeEditorProps) {
+export default function CodeEditor({ workspaceId, fileId, language, currentUser, onCodeChange, onEditorReady, onAwarenessChange, onConnectionStatusChange }: CodeEditorProps) {
   const [editor, setEditor] = useState<any>(null);
   const [awarenessStates, setAwarenessStates] = useState<any[]>([]);
 
@@ -43,11 +46,21 @@ export default function CodeEditor({ workspaceId, fileId, language, currentUser,
 
     const ydoc = new Y.Doc();
     const roomName = `${workspaceId}-${fileId}`;
+    
+    // Setup offline persistence
+    const indexeddbProvider = new IndexeddbPersistence(roomName, ydoc);
+
     const wsProvider = new WebsocketProvider(
       'ws://localhost:4000',
       roomName,
       ydoc
     );
+
+    wsProvider.on('status', (event: { status: 'connected' | 'disconnected' | 'connecting' }) => {
+      if (onConnectionStatusChange) {
+        onConnectionStatusChange(event.status);
+      }
+    });
 
     wsProvider.awareness.setLocalStateField('user', {
       name: currentUser.username,
@@ -80,6 +93,7 @@ export default function CodeEditor({ workspaceId, fileId, language, currentUser,
     return () => {
       binding.destroy();
       wsProvider.destroy();
+      indexeddbProvider.destroy();
       ydoc.destroy();
     };
   }, [editor, workspaceId, fileId]);

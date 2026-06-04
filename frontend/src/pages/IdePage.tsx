@@ -17,11 +17,12 @@ function IdePage() {
   const [files, setFiles] = useState<AppFile[]>([]);
   const [activeFile, setActiveFile] = useState<AppFile | null>(null);
   const [activeCollaborators, setActiveCollaborators] = useState<any[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
 
   const editorRef = useRef<any>(null);
   const workspaceWsProviderRef = useRef<any>(null);
   const navigate = useNavigate();
-  const { workspaceId: urlWorkspaceId, fileId: urlFileId } = useParams<{workspaceId: string, fileId: string}>();
+  const { workspaceId: urlWorkspaceId, fileId: urlFileId } = useParams<{ workspaceId: string, fileId: string }>();
 
   const fetchFiles = async (wsId: string) => {
     try {
@@ -63,12 +64,12 @@ function IdePage() {
         const wsRes = await fetch(`http://localhost:4000/api/workspace/${urlWorkspaceId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        
+
         if (!wsRes.ok) {
           navigate('/dashboard');
           return;
         }
-        
+
         const wsData = await wsRes.json();
         setWorkspaceId(wsData.id);
         setWorkspaceTitle(wsData.title);
@@ -90,7 +91,7 @@ function IdePage() {
   // Workspace-level Yjs Sync for File Tree Updates
   useEffect(() => {
     if (!urlWorkspaceId) return;
-    
+
     const ydoc = new Y.Doc();
     const wsProvider = new WebsocketProvider(
       'ws://localhost:4000',
@@ -114,7 +115,7 @@ function IdePage() {
 
   useEffect(() => {
     if (files.length === 0) return;
-    
+
     if (!urlFileId) {
       const firstFile = files.find((file) => file.type === 'file');
       if (firstFile) {
@@ -155,12 +156,12 @@ function IdePage() {
       if (!res.ok) throw new Error(newFile.error);
 
       setFiles((prev) => [...prev, newFile].sort((a, b) => a.name.localeCompare(b.name)));
-      
+
       // Notify other clients in the workspace
       if (workspaceWsProviderRef.current) {
         workspaceWsProviderRef.current.doc.getMap('workspace-events').set('lastFileUpdate', Date.now());
       }
-      
+
       if (type === 'file') {
         navigate(`/ide/${urlWorkspaceId}/${newFile.id}`);
       }
@@ -233,7 +234,28 @@ function IdePage() {
       </div>
     );
   }
+  // Helper to generate the full path breadcrumbs for the active file
+  const getFileBreadcrumbs = () => {
+    if (!activeFile) return [];
 
+    const path = [activeFile];
+    let currentParentId = activeFile.parent_id;
+
+    // Safety limit to prevent infinite loops in case of corrupted data
+    let depth = 0;
+    while (currentParentId && depth < 20) {
+      const parent = files.find(f => f.id === currentParentId);
+      if (parent) {
+        path.unshift(parent);
+        currentParentId = parent.parent_id;
+        depth++;
+      } else {
+        break;
+      }
+    }
+
+    return path;
+  };
   return (
     <div className="relative flex h-screen w-full flex-col overflow-hidden bg-[#050608] text-zinc-300 selection:bg-cyan-400/25">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.08),transparent_28%),radial-gradient(circle_at_85%_15%,rgba(59,130,246,0.08),transparent_24%)]" />
@@ -253,38 +275,80 @@ function IdePage() {
             </div>
           </div>
 
-          {/* Upgraded Collaborators Section */}
-<div className="flex items-center gap-3 mr-2">
-  {activeCollaborators.length > 0 && (
-    <div className="flex items-center">
-      <div className="flex -space-x-3 transition-all duration-300 hover:space-x-1">
-        {activeCollaborators.map((collaborator, index) => (
-          <div 
-            key={collaborator.clientId || index} 
-            className="group relative flex h-8 w-8 cursor-default items-center justify-center rounded-full border-2 border-[#050608] text-xs font-bold text-white transition-transform hover:z-10 hover:-translate-y-1"
-            style={{ 
-              backgroundColor: collaborator.color || '#06b6d4',
-              boxShadow: `0 0 12px ${collaborator.color || '#06b6d4'}40`
-            }}
-          >
-            {/* Avatar Initials */}
-            {collaborator.name ? collaborator.name.substring(0, 2).toUpperCase() : '??'}
+          {/* Right Side: Collaborators, Connection, and Actions */}
+          <div className="flex items-center gap-3">
 
-            {/* Premium Tooltip */}
-            <div className="pointer-events-none absolute -bottom-10 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-zinc-900 px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-zinc-200 opacity-0 shadow-xl transition-all duration-200 group-hover:-translate-y-1 group-hover:opacity-100">
-              {collaborator.name}
-              {/* Tooltip Arrow */}
-              <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-l border-t border-white/10 bg-zinc-900" />
+            {/* Connection Indicator */}
+            <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors mr-2 ${connectionStatus === 'connected'
+              ? 'border-emerald-400/15 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/12'
+              : connectionStatus === 'disconnected'
+                ? 'border-red-400/15 bg-red-400/10 text-red-200 hover:bg-red-400/12'
+                : 'border-amber-400/15 bg-amber-400/10 text-amber-200 hover:bg-amber-400/12'
+              }`}>
+              <span className="relative flex h-2 w-2">
+                {connectionStatus === 'connected' && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-70" />
+                )}
+                {connectionStatus === 'connecting' && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-70" />
+                )}
+                <span className={`relative inline-flex h-2 w-2 rounded-full ${connectionStatus === 'connected' ? 'bg-emerald-400' : connectionStatus === 'disconnected' ? 'bg-red-400' : 'bg-amber-400'
+                  }`} />
+              </span>
+              {connectionStatus === 'connected' ? <Users size={14} className="text-emerald-200/80" /> : connectionStatus === 'disconnected' ? <Cloud size={14} className="text-red-200/80" /> : <Loader2 size={14} className="animate-spin text-amber-200/80" />}
+              <span>
+                {connectionStatus === 'connected' ? 'Live Sync' : connectionStatus === 'disconnected' ? 'Offline' : 'Connecting...'}
+              </span>
             </div>
+
+            {/* Upgraded Collaborators Section */}
+            {activeCollaborators.length > 0 && (
+              <div className="flex items-center mr-2">
+                <div className="flex -space-x-3 transition-all duration-300 hover:space-x-1">
+                  {activeCollaborators.map((collaborator, index) => (
+                    <div
+                      key={collaborator.clientId || index}
+                      className="group relative flex h-8 w-8 cursor-default items-center justify-center rounded-full border-2 border-[#050608] text-xs font-bold text-white transition-transform hover:z-10 hover:-translate-y-1"
+                      style={{
+                        backgroundColor: collaborator.color || '#06b6d4',
+                        boxShadow: `0 0 12px ${collaborator.color || '#06b6d4'}40`
+                      }}
+                    >
+                      {/* Avatar Initials */}
+                      {collaborator.name ? collaborator.name.substring(0, 2).toUpperCase() : '??'}
+
+                      {/* Premium Tooltip */}
+                      <div className="pointer-events-none absolute -bottom-10 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-zinc-900 px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-zinc-200 opacity-0 shadow-xl transition-all duration-200 group-hover:-translate-y-1 group-hover:opacity-100">
+                        {collaborator.name}
+                        {/* Tooltip Arrow */}
+                        <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-l border-t border-white/10 bg-zinc-900" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <span className="ml-3 text-[11px] font-medium tracking-wide text-zinc-500">
+                  {activeCollaborators.length} {activeCollaborators.length === 1 ? 'Online' : 'Online'}
+                </span>
+              </div>
+            )}
+
+            {/* Restored Missing Buttons */}
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/10"
+            >
+              Back to Dashboard
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-red-400/20 hover:bg-red-500/10 hover:text-red-300"
+            >
+              <LogOut size={14} />
+              Logout
+            </button>
+
           </div>
-        ))}
-      </div>
-      <span className="ml-3 text-[11px] font-medium tracking-wide text-zinc-500">
-        {activeCollaborators.length} {activeCollaborators.length === 1 ? 'Online' : 'Online'}
-      </span>
-    </div>
-  )}
-</div>
         </header>
 
         <div className="flex min-h-0 flex-1 overflow-hidden p-4 sm:p-5">
@@ -303,7 +367,31 @@ function IdePage() {
               <div className="flex items-center justify-between border-b border-white/10 px-5 py-3 sm:px-6">
                 <div className="flex items-center gap-2.5 text-sm">
                   <Book size={16} className="text-cyan-300/80" />
-                  <span className="font-medium text-zinc-100">{activeFile?.name || 'No file selected'}</span>
+
+                  {activeFile ? (
+                    <div className="flex items-center">
+                      {getFileBreadcrumbs().map((crumb, index, arr) => {
+                        const isLast = index === arr.length - 1;
+                        return (
+                          <div key={crumb.id} className="flex items-center">
+                            <span
+                              className={`transition-colors ${isLast
+                                  ? 'font-medium text-zinc-100'
+                                  : 'text-zinc-400 hover:text-zinc-300'
+                                }`}
+                            >
+                              {crumb.name}
+                            </span>
+                            {!isLast && (
+                              <span className="mx-2 text-zinc-600 font-light">/</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <span className="font-medium text-zinc-100">No file selected</span>
+                  )}
                 </div>
 
                 {activeFile && (
@@ -314,9 +402,9 @@ function IdePage() {
                     </div>
 
                     <button
-  onClick={handleExecute}
-  disabled={isExecuting}
-  className="
+                      onClick={handleExecute}
+                      disabled={isExecuting}
+                      className="
     flex items-center gap-2
     rounded-full
     border border-cyan-300/20
@@ -332,15 +420,15 @@ function IdePage() {
     disabled:cursor-not-allowed
     disabled:opacity-60
   "
->
-  {isExecuting ? (
-    <Loader2 size={14} className="animate-spin" />
-  ) : (
-    <Play size={14} fill="currentColor" />
-  )}
+                    >
+                      {isExecuting ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Play size={14} fill="currentColor" />
+                      )}
 
-  {isExecuting ? 'Running...' : 'Run Code'}
-</button>
+                      {isExecuting ? 'Running...' : 'Run Code'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -358,6 +446,7 @@ function IdePage() {
                         language={activeFile.language || 'javascript'}
                         currentUser={user}
                         onAwarenessChange={setActiveCollaborators}
+                        onConnectionStatusChange={setConnectionStatus}
                         onEditorReady={(editor) => {
                           editorRef.current = editor;
                         }}
