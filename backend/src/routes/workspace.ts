@@ -198,13 +198,13 @@ router.delete('/:id/files/:fileId', async (req: AuthRequest, res: Response): Pro
 // Execute code route
 router.post('/execute', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { code, language } = req.body;
+    const { code, language, input } = req.body;
     if (!code || !language) {
       res.status(400).json({ error: 'Code and language are required' });
       return;
     }
 
-    const output = await executeCode(code, language);
+    const output = await executeCode(code, language, input || undefined);
     res.json({ output });
   } catch (error: any) {
     res.status(500).json({ error: error.message || 'Execution failed' });

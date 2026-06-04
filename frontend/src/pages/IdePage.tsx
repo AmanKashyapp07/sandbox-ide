@@ -4,7 +4,7 @@ import CodeEditor from '../components/Editor/CodeEditor';
 import OutputPanel from '../components/Terminal/OutputPanel';
 import Sidebar, { type AppFile } from '../components/Sidebar/Sidebar';
 import VoiceChat from '../components/Voice/VoiceChat';
-import { Play, Zap, Users, Book, LogOut, Loader2 } from 'lucide-react';
+import { Play, Zap, Users, Book, LogOut, Loader2, Keyboard } from 'lucide-react';
 import * as Y from 'yjs';
 // @ts-ignore
 import { WebsocketProvider } from 'y-websocket';
@@ -12,6 +12,7 @@ import { WebsocketProvider } from 'y-websocket';
 function IdePage() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [fileOutputs, setFileOutputs] = useState<Record<string, string>>({});
+  const [stdinInputs, setStdinInputs] = useState<Record<string, string>>({});
   const [user, setUser] = useState<{ username: string; id: string } | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [workspaceTitle, setWorkspaceTitle] = useState<string>('Loading...');
@@ -211,7 +212,7 @@ function IdePage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ code, language: activeFile.language }),
+        body: JSON.stringify({ code, language: activeFile.language, input: stdinInputs[activeFile.id] || '' }),
       });
 
       const data = await response.json();
@@ -473,6 +474,27 @@ function IdePage() {
                 </section>
 
                 <section className="flex min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-[rgba(7,6,11,0.9)] shadow-[0_16px_50px_rgba(0,0,0,0.3)]">
+                  {/* Stdin Input Section */}
+                  <div className="border-b border-white/[0.06]">
+                    <div className="flex items-center gap-1.5 bg-white/[0.03] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">
+                      <Keyboard size={12} className="text-violet-400/70" />
+                      Input (stdin)
+                    </div>
+                    <textarea
+                      value={stdinInputs[activeFile?.id || ''] || ''}
+                      onChange={(e) => {
+                        const fileId = activeFile?.id || '';
+                        setStdinInputs((prev) => ({ ...prev, [fileId]: e.target.value }));
+                      }}
+                      placeholder="Enter input here (e.g. for scanf, input(), cin)..."
+                      className="w-full resize-none border-0 bg-[rgba(7,6,11,0.95)] px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-300 placeholder:text-zinc-600 outline-none focus:bg-[rgba(13,12,20,0.95)]"
+                      rows={3}
+                    />
+                    <div className="border-t border-white/[0.04] bg-white/[0.02] px-4 py-1.5 text-[10px] text-zinc-500">
+                      If your code reads input, add it above before running.
+                    </div>
+                  </div>
+                  {/* Terminal Output Section */}
                   <div className="border-b border-white/[0.06] bg-white/[0.03] px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">
                     Terminal
                   </div>

@@ -1,13 +1,10 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import crypto from 'crypto';
 
-const execAsync = promisify(exec);
-
-export async function executeCode(code: string, language: string): Promise<string> {
+export async function executeCode(code: string, language: string, input?: string): Promise<string> {
   const tempDir = os.tmpdir();
   const fileId = crypto.randomUUID();
   
@@ -44,10 +41,9 @@ export async function executeCode(code: string, language: string): Promise<strin
       return `Error: Unsupported language ${language}`;
     }
 
-    // Execute locally with a 2000ms timeout
-    const { stdout, stderr } = await execAsync(command, { timeout: 2000 });
-    
-    return stdout + (stderr || '');
+    // Execute locally with a 2000ms timeout, piping stdin if provided
+    const result = await runWithStdin(command, input, 2000);
+    return result;
   } catch (error: any) {
     // Check if the process was killed due to the timeout
     if (error.killed && error.signal === 'SIGTERM') {
@@ -64,4 +60,43 @@ export async function executeCode(code: string, language: string): Promise<strin
       }
     }
   }
+}
+
+/**
+ * Spawns a shell command, writes optional stdin, and collects output with a timeout.
+ */
+function runWithStdin(command: string, input: string | undefined, timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, { shell: true, timeout: timeoutMs });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code === null) {
+        // Process was killed (e.g. timeout)
+        reject({ killed: true, signal: 'SIGTERM', stdout, stderr });
+      } else {
+        resolve(stdout + (stderr || ''));
+      }
+    });
+
+    child.on('error', (err) => {
+      reject({ killed: false, stdout, stderr, message: err.message });
+    });
+
+    // Write stdin input and close the stream
+    if (input) {
+      child.stdin.write(input);
+    }
+    child.stdin.end();
+  });
 }
