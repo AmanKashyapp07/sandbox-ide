@@ -17,6 +17,8 @@ import { setupWSConnection, setPersistence } from 'y-websocket/bin/utils';
 import workspaceRoutes from './routes/workspace';
 import authRoutes from './routes/auth';
 import { requireAuth } from './middleware/auth';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 // =============================================================================
 // EXPRESS APPLICATION SETUP
@@ -391,9 +393,32 @@ io.on('connection', (socket) => {
 // START THE SERVER
 // =============================================================================
 const PORT = process.env.PORT || 4000;
-
+// on server startup, clean temp_sandboxes of any previous runs to prevent disk bloat from orphaned sandboxes.
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+
+  // Clean temp_sandbox folder of any files left from aborted executions or crashes
+  const tempSandboxDir = path.join(process.cwd(), 'temp_sandbox');
+  fs.readdir(tempSandboxDir)
+    .then(async (files) => {
+      for (const file of files) {
+        // We preserve manual helper files or gitkeep files, but clean up the temp uuid/python files
+        if (file !== '.gitkeep' && file !== 'test.py') {
+          try {
+            await fs.unlink(path.join(tempSandboxDir, file));
+          } catch (err: any) {
+            console.error(`Failed to delete temp file ${file}:`, err.message);
+          }
+        }
+      }
+      console.log('✅ Cleaned up old/orphaned files in temp_sandbox.');
+    })
+    .catch((err) => {
+      // If the directory doesn't exist, that's fine, we'll create it during runs anyway
+      if (err.code !== 'ENOENT') {
+        console.error('Failed to read temp_sandbox directory:', err.message);
+      }
+    });
 
   // Quick DB connectivity check on startup.
   // SELECT NOW() is the lightest possible query — no table scan, just returns
