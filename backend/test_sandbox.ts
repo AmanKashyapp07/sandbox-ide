@@ -1,10 +1,15 @@
 // test_sandbox.ts
 import { executeCode } from './src/sandbox/docker';
+import { warmPoolManager } from './src/sandbox/pool';
 
 async function runTests() {
   console.log("=========================================================");
   console.log("   DOCKER SANDBOX ISOLATION & SECURITY TEST SUITE   ");
   console.log("=========================================================\n");
+
+  console.log("Initializing warm container pools for test suite...");
+  await warmPoolManager.initializePools();
+  console.log("");
 
   // Test Case 1: Simple Python execution
   try {
@@ -124,6 +129,8 @@ except Exception as e:
   console.log("=========================================================");
   console.log("               TEST EXECUTION COMPLETED                  ");
   console.log("=========================================================");
+
+  await warmPoolManager.cleanup();
 }
 
 runTests();

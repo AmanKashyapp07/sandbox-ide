@@ -19,6 +19,7 @@ import authRoutes from './routes/auth';
 import { requireAuth } from './middleware/auth';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { warmPoolManager } from './sandbox/pool';
 
 // =============================================================================
 // EXPRESS APPLICATION SETUP
@@ -397,6 +398,11 @@ const PORT = process.env.PORT || 4000;
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 
+  // Initialize the warm container pool
+  warmPoolManager.initializePools().catch((err) => {
+    console.error('❌ Failed to initialize warm container pools:', err.message);
+  });
+
   // Clean temp_sandbox folder of any files left from aborted executions or crashes
   const tempSandboxDir = path.join(process.cwd(), 'temp_sandbox');
   fs.readdir(tempSandboxDir)
@@ -432,3 +438,17 @@ server.listen(PORT, () => {
     }
   });
 });
+
+// Process event listeners for graceful shutdown
+const gracefulShutdown = async (signal: string) => {
+  console.log(`Received ${signal}. Starting graceful shutdown...`);
+  try {
+    await warmPoolManager.cleanup();
+  } catch (err: any) {
+    console.error('Failed to clean up warm pool during shutdown:', err.message);
+  }
+  process.exit(0);
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
