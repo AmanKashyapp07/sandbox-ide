@@ -104,6 +104,7 @@ CREATE TABLE execution_history (
     status execution_status NOT NULL,
     duration_ms INTEGER,
     memory_usage_bytes BIGINT,
+    cpu_usage_percent NUMERIC(5, 2),
     executed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

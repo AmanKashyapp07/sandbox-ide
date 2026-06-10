@@ -475,27 +475,110 @@ router.delete('/:id/files/:fileId', requireWorkspaceRole('editor'), async (req: 
 //   Guarded strictly. A 'viewer' can read code, but cannot trigger executions.
 //   This prevents unauthorized resource exhaustion of our Docker host.
 //   Proxies execution payloads to the helper in `docker.ts`, capturing runtime
-//   metrics (OOM, duration, exit code) for tracking sandbox performance.
+//   metrics (OOM, duration, exit code, CPU, RAM) for tracking sandbox performance.
 router.post('/:id/execute', requireWorkspaceRole('editor'), async (req: WorkspaceAuthRequest, res: Response): Promise<void> => {
-  try {
-    const { code, language, input } = req.body;
-    if (!code || !language) {
-      res.status(400).json({ error: 'Code and language are required' });
-      return;
-    }
+  const { id } = req.params;
+  const userId = req.user?.id;
+  const { code, language, input } = req.body;
 
-    const result = await executeCode(code, language, input || undefined);
+  if (!code || !language) {
+    res.status(400).json({ error: 'Code and language are required' });
+    return;
+  }
+
+  let status: 'success' | 'failed' | 'timeout' | 'error' = 'success';
+  let result;
+
+  try {
+    result = await executeCode(code, language, input || undefined);
     
-    res.json({
-      output: result.output,
-      metrics: {
-        durationMs: result.durationMs,
-        exitCode: result.exitCode,
-        oomKilled: result.oomKilled 
-      }
-    });
+    if (result.oomKilled) {
+      status = 'failed';
+    } else if (result.exitCode === 137) {
+      status = 'timeout';
+    } else if (result.exitCode === 0) {
+      status = 'success';
+    } else {
+      status = 'failed';
+    }
   } catch (error: any) {
+    // Write an error log entry to database
+    try {
+      await getPool().query(
+        `INSERT INTO execution_history (
+          workspace_id, user_id, language, code_snapshot, output, status, duration_ms, memory_usage_bytes, cpu_usage_percent
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          id,
+          userId || null,
+          language,
+          code,
+          error.message || String(error),
+          'error',
+          0,
+          0,
+          0.0
+        ]
+      );
+    } catch (dbErr) {
+      console.error('[db] Failed to log failed execution into history:', dbErr);
+    }
+    
     res.status(500).json({ error: error.message || 'Execution failed' });
+    return;
+  }
+
+  // Log code execution to database
+  try {
+    await getPool().query(
+      `INSERT INTO execution_history (
+        workspace_id, user_id, language, code_snapshot, output, status, duration_ms, memory_usage_bytes, cpu_usage_percent
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        id,
+        userId || null,
+        language,
+        code,
+        result.output,
+        status,
+        Math.round(result.durationMs),
+        result.memoryUsageBytes || 0,
+        result.cpuUsagePercent || 0.0
+      ]
+    );
+  } catch (dbErr) {
+    console.error('[db] Failed to log execution into history:', dbErr);
+  }
+
+  res.json({
+    output: result.output,
+    metrics: {
+      durationMs: result.durationMs,
+      exitCode: result.exitCode,
+      oomKilled: result.oomKilled,
+      cpuUsagePercent: result.cpuUsagePercent,
+      memoryUsageBytes: result.memoryUsageBytes
+    }
+  });
+});
+
+// GET /:id/execution-history - Retrieve the last 10 execution records for a workspace
+// Guarded by requireWorkspaceRole('viewer')
+router.get('/:id/execution-history', requireWorkspaceRole('viewer'), async (req: WorkspaceAuthRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const history = await getPool().query(
+      `SELECT eh.id, eh.user_id, u.username, eh.language, eh.status, eh.duration_ms, eh.memory_usage_bytes, eh.cpu_usage_percent, eh.executed_at 
+       FROM execution_history eh
+       LEFT JOIN users u ON eh.user_id = u.id
+       WHERE eh.workspace_id = $1 
+       ORDER BY eh.executed_at DESC 
+       LIMIT 10`,
+      [id]
+    );
+    res.json(history.rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 

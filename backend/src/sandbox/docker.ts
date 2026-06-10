@@ -7,6 +7,8 @@ export interface ExecutionResult {
   durationMs: number;
   exitCode: number;
   oomKilled: boolean;
+  cpuUsagePercent?: number;
+  memoryUsageBytes?: number;
 }
 
 
@@ -252,7 +254,9 @@ export async function executeCode(
       output: errorMsg.trimEnd(),
       durationMs: error.durationMs ?? 0,
       exitCode: error.exitCode ?? -1,
-      oomKilled: error.oomKilled ?? false
+      oomKilled: error.oomKilled ?? false,
+      cpuUsagePercent: error.cpuUsagePercent ?? 0,
+      memoryUsageBytes: error.memoryUsageBytes ?? 0
     };
   }
 }
@@ -300,6 +304,13 @@ async function runInDocker(
 ): Promise<ExecutionResult> {
   let container: Docker.Container | null = null;
   const startTime = performance.now();
+
+  let maxMemory = 0;
+  let peakCpuPercent = 0.0;
+  let totalCpuPercent = 0.0;
+  let cpuSamplesCount = 0;
+  let pollingActive = true;
+  let pollPromise: Promise<void> = Promise.resolve();
 
   // Hoisted outside try so the catch block can include partial output
   // captured before a timeout or runtime crash.
@@ -355,6 +366,40 @@ async function runInDocker(
       writeStream.on('end', () => resolve());
       writeStream.on('error', (err) => reject(err));
     });
+
+    // Start background stats polling
+    const pollStats = async () => {
+      while (pollingActive && container) {
+        try {
+          const stats = await container.stats({ stream: false });
+          if (!pollingActive) break;
+
+          const currentMemory = stats.memory_stats?.usage || 0;
+          if (currentMemory > maxMemory) {
+            maxMemory = currentMemory;
+          }
+
+          if (stats.cpu_stats && stats.precpu_stats) {
+            const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+            const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+            const onlineCpus = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
+            
+            if (systemDelta > 0 && cpuDelta > 0) {
+              const cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
+              if (cpuPercent > peakCpuPercent) {
+                peakCpuPercent = cpuPercent;
+              }
+              totalCpuPercent += cpuPercent;
+              cpuSamplesCount++;
+            }
+          }
+        } catch {
+          break;
+        }
+        await new Promise((res) => setTimeout(res, 100));
+      }
+    };
+    pollPromise = pollStats();
 
     // -------------------------------------------------------------------------
     // STEP 3: Execute the user's code inside the container
@@ -497,6 +542,29 @@ async function runInDocker(
     await Promise.race([runPromise, timeoutPromise]);
     if (timeoutId) clearTimeout(timeoutId);
 
+    // Stop background stats polling
+    pollingActive = false;
+    await pollPromise;
+
+    // Do one final check if we don't have any samples or memory reading
+    if (maxMemory === 0 && container) {
+      try {
+        const stats = await container.stats({ stream: false });
+        maxMemory = stats.memory_stats?.usage || 0;
+        if (stats.cpu_stats && stats.precpu_stats) {
+          const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+          const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+          const onlineCpus = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
+          if (systemDelta > 0 && cpuDelta > 0) {
+            const cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
+            peakCpuPercent = cpuPercent;
+          }
+        }
+      } catch {
+        // Container might have exited
+      }
+    }
+
     // -------------------------------------------------------------------------
     // STEP 5b: Flush the Node.js event loop microtask queue
     // -------------------------------------------------------------------------
@@ -539,7 +607,9 @@ async function runInDocker(
       output: (stdoutData + (stderrData ? '\n' + stderrData : '') + capNotice).trimEnd(),
       durationMs,
       exitCode,
-      oomKilled
+      oomKilled,
+      cpuUsagePercent: Number(peakCpuPercent.toFixed(2)),
+      memoryUsageBytes: maxMemory
     };
 
   } catch (err: any) {
@@ -554,9 +624,39 @@ async function runInDocker(
     //      We try to inspect the container for its exit code and OOM status,
     //      but the container might already be gone (removed by another path
     //      or Docker garbage collection), so we wrap inspection in try/catch.
+    // Stop background stats polling on error
+    pollingActive = false;
+    await pollPromise.catch(() => {});
+
+    // Try to get final stats before we throw, if not already populated
+    if (maxMemory === 0 && container) {
+      try {
+        const stats = await container.stats({ stream: false });
+        maxMemory = stats.memory_stats?.usage || 0;
+        if (stats.cpu_stats && stats.precpu_stats) {
+          const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
+          const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
+          const onlineCpus = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
+          if (systemDelta > 0 && cpuDelta > 0) {
+            const cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
+            peakCpuPercent = cpuPercent;
+          }
+        }
+      } catch {}
+    }
+
     const durationMs = performance.now() - startTime;
     if (err && err.killed) {
-      throw { killed: true, stdout: stdoutData, stderr: stderrData, durationMs, exitCode: 137, oomKilled: false };
+      throw {
+        killed: true,
+        stdout: stdoutData,
+        stderr: stderrData,
+        durationMs,
+        exitCode: 137,
+        oomKilled: false,
+        cpuUsagePercent: Number(peakCpuPercent.toFixed(2)),
+        memoryUsageBytes: maxMemory
+      };
     }
     let containerExitCode = -1;
     let containerOomKilled = false;
@@ -577,7 +677,9 @@ async function runInDocker(
       message: err?.message ?? String(err),
       durationMs,
       exitCode: containerExitCode !== -1 ? containerExitCode : (err?.exitCode ?? -1),
-      oomKilled: containerOomKilled || (err?.oomKilled ?? false)
+      oomKilled: containerOomKilled || (err?.oomKilled ?? false),
+      cpuUsagePercent: Number(peakCpuPercent.toFixed(2)),
+      memoryUsageBytes: maxMemory
     };
   } finally {
     // -------------------------------------------------------------------------

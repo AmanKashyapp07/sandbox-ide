@@ -4,6 +4,8 @@ interface ExecutionMetrics {
   durationMs: number;
   exitCode: number;
   oomKilled: boolean;
+  cpuUsagePercent?: number;
+  memoryUsageBytes?: number;
 }
 
 interface OutputPanelProps {
@@ -61,6 +63,26 @@ export default function OutputPanel({ output, isExecuting, metrics }: OutputPane
           <div>
             Exit Code: <span className={`font-mono ${metrics.exitCode === 0 ? 'text-zinc-200' : 'text-red-400'}`}>{metrics.exitCode}</span>
           </div>
+          {metrics.cpuUsagePercent !== undefined && metrics.cpuUsagePercent !== null && (
+            <>
+              <div className="h-3 w-px bg-white/[0.08]" />
+              <div>
+                CPU: <span className="font-mono text-zinc-200">{metrics.cpuUsagePercent.toFixed(1)}%</span>
+              </div>
+            </>
+          )}
+          {metrics.memoryUsageBytes !== undefined && metrics.memoryUsageBytes !== null && (
+            <>
+              <div className="h-3 w-px bg-white/[0.08]" />
+              <div>
+                RAM: <span className="font-mono text-zinc-200">
+                  {metrics.memoryUsageBytes >= 1024 * 1024
+                    ? `${(metrics.memoryUsageBytes / 1024 / 1024).toFixed(1)} MB`
+                    : `${(metrics.memoryUsageBytes / 1024).toFixed(0)} KB`}
+                </span>
+              </div>
+            </>
+          )}
           {metrics.oomKilled && (
             <>
               <div className="h-3 w-px bg-white/[0.08]" />

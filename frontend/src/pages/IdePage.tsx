@@ -5,7 +5,8 @@ import OutputPanel from '../components/Terminal/OutputPanel';
 import Sidebar, { type AppFile } from '../components/Sidebar/Sidebar';
 import VoiceChat from '../components/Voice/VoiceChat';
 import CollaboratorsModal from '../components/Collaborators/CollaboratorsModal';
-import { Play, Zap, Users, Book, LogOut, Loader2, Keyboard } from 'lucide-react';
+import PerformanceModal from '../components/Terminal/PerformanceModal';
+import { Play, Zap, Users, Book, LogOut, Loader2, Keyboard, Activity } from 'lucide-react';
 import * as Y from 'yjs';
 // @ts-ignore
 import { WebsocketProvider } from 'y-websocket';
@@ -14,7 +15,7 @@ import { io, Socket } from 'socket.io-client';
 function IdePage() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [fileOutputs, setFileOutputs] = useState<Record<string, string>>({});
-  const [fileMetrics, setFileMetrics] = useState<Record<string, { durationMs: number; exitCode: number; oomKilled: boolean } | null>>({});
+  const [fileMetrics, setFileMetrics] = useState<Record<string, { durationMs: number; exitCode: number; oomKilled: boolean; cpuUsagePercent?: number; memoryUsageBytes?: number } | null>>({});
   const [stdinInputs, setStdinInputs] = useState<Record<string, string>>({});
   const [user, setUser] = useState<{ username: string; id: string } | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -26,6 +27,7 @@ function IdePage() {
   const [isCollabModalOpen, setIsCollabModalOpen] = useState(false);
   const [isActiveMembersOpen, setIsActiveMembersOpen] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
+  const [isPerformanceModalOpen, setIsPerformanceModalOpen] = useState(false);
 
   const editorRef = useRef<any>(null);
   const workspaceWsProviderRef = useRef<any>(null);
@@ -510,6 +512,26 @@ function IdePage() {
                       )}
                       {isExecuting ? 'Running...' : 'Run Code'}
                     </button>
+
+                    <button
+                      onClick={() => setIsPerformanceModalOpen(true)}
+                      className="
+                        flex items-center gap-2
+                        rounded-full
+                        border border-white/10
+                        bg-white/5
+                        px-4 py-2
+                        text-sm font-semibold text-zinc-300
+                        transition-all duration-200
+                        hover:bg-white/10
+                        hover:text-white
+                        active:scale-[0.98]
+                        cursor-pointer
+                      "
+                    >
+                      <Activity size={14} className="text-violet-400" />
+                      Diagnostics
+                    </button>
                   </div>
                 )}
               </div>
@@ -586,6 +608,14 @@ function IdePage() {
           userRole={userRole}
           isOpen={isCollabModalOpen}
           onClose={() => setIsCollabModalOpen(false)}
+        />
+      )}
+
+      {workspaceId && (
+        <PerformanceModal
+          isOpen={isPerformanceModalOpen}
+          onClose={() => setIsPerformanceModalOpen(false)}
+          workspaceId={workspaceId}
         />
       )}
     </div>
