@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { Writable } from 'stream';
 
 export interface ExecutionResult {
   output: string;
@@ -217,6 +218,49 @@ function normalizeInput(raw: string): string {
   return tokens.join('\n') + '\n';
 }
 
+interface CgroupMetrics {
+  cpuUsec: number;
+  memoryBytes: number;
+}
+
+// Helper to query CPU usage (microseconds) and peak memory usage (bytes) from cgroups v2.
+async function getCgroupMetrics(container: Docker.Container): Promise<CgroupMetrics> {
+  try {
+    const exec = await container.exec({
+      Cmd: ['cat', '/sys/fs/cgroup/cpu.stat', '/sys/fs/cgroup/memory.peak'],
+      AttachStdout: true,
+      AttachStderr: false
+    });
+    const stream = await exec.start({ hijack: true });
+    const output = await new Promise<string>((resolve) => {
+      let data = '';
+      const writable = new Writable({
+        write(chunk, encoding, callback) {
+          data += chunk.toString('utf8');
+          callback();
+        }
+      });
+      container.modem.demuxStream(stream, writable, writable);
+      stream.on('end', () => resolve(data));
+    });
+    const lines = output.trim().split('\n');
+    let cpuUsec = 0;
+    let memoryBytes = 0;
+    for (const line of lines) {
+      if (line.startsWith('usage_usec')) {
+        cpuUsec = parseInt(line.split(/\s+/)[1] || '0', 10);
+      }
+    }
+    const lastLine = lines[lines.length - 1];
+    if (lastLine && /^\d+$/.test(lastLine.trim())) {
+      memoryBytes = parseInt(lastLine.trim(), 10);
+    }
+    return { cpuUsec, memoryBytes };
+  } catch (e) {
+    return { cpuUsec: 0, memoryBytes: 0 };
+  }
+}
+
 // =============================================================================
 // PUBLIC API
 // =============================================================================
@@ -307,10 +351,8 @@ async function runInDocker(
 
   let maxMemory = 0;
   let peakCpuPercent = 0.0;
-  let totalCpuPercent = 0.0;
-  let cpuSamplesCount = 0;
-  let pollingActive = true;
-  let pollPromise: Promise<void> = Promise.resolve();
+  let startMetrics: CgroupMetrics | null = null;
+  let runStartTime = 0;
 
   // Hoisted outside try so the catch block can include partial output
   // captured before a timeout or runtime crash.
@@ -367,39 +409,9 @@ async function runInDocker(
       writeStream.on('error', (err) => reject(err));
     });
 
-    // Start background stats polling
-    const pollStats = async () => {
-      while (pollingActive && container) {
-        try {
-          const stats = await container.stats({ stream: false });
-          if (!pollingActive) break;
-
-          const currentMemory = stats.memory_stats?.usage || 0;
-          if (currentMemory > maxMemory) {
-            maxMemory = currentMemory;
-          }
-
-          if (stats.cpu_stats && stats.precpu_stats) {
-            const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-            const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-            const onlineCpus = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
-            
-            if (systemDelta > 0 && cpuDelta > 0) {
-              const cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
-              if (cpuPercent > peakCpuPercent) {
-                peakCpuPercent = cpuPercent;
-              }
-              totalCpuPercent += cpuPercent;
-              cpuSamplesCount++;
-            }
-          }
-        } catch {
-          break;
-        }
-        await new Promise((res) => setTimeout(res, 100));
-      }
-    };
-    pollPromise = pollStats();
+    // Fetch initial cgroup CPU and Memory usage metrics before executing code
+    startMetrics = await getCgroupMetrics(container);
+    runStartTime = performance.now();
 
     // -------------------------------------------------------------------------
     // STEP 3: Execute the user's code inside the container
@@ -542,28 +554,20 @@ async function runInDocker(
     await Promise.race([runPromise, timeoutPromise]);
     if (timeoutId) clearTimeout(timeoutId);
 
-    // Stop background stats polling
-    pollingActive = false;
-    await pollPromise;
-
-    // Do one final check if we don't have any samples or memory reading
-    if (maxMemory === 0 && container) {
-      try {
-        const stats = await container.stats({ stream: false });
-        maxMemory = stats.memory_stats?.usage || 0;
-        if (stats.cpu_stats && stats.precpu_stats) {
-          const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-          const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-          const onlineCpus = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
-          if (systemDelta > 0 && cpuDelta > 0) {
-            const cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
-            peakCpuPercent = cpuPercent;
-          }
-        }
-      } catch {
-        // Container might have exited
-      }
-    }
+    // Fetch final cgroup CPU and Memory usage metrics after execution completed
+    const runEndTime = performance.now();
+    const endMetrics = await getCgroupMetrics(container);
+    maxMemory = endMetrics.memoryBytes;
+    const cpuDurationMs = runEndTime - runStartTime;
+    const rawCpuDeltaUsec = endMetrics.cpuUsec - (startMetrics?.cpuUsec || 0);
+    let overheadUsec = 12_000;
+    if (language === 'python') overheadUsec = 40_000;
+    else if (language === 'javascript') overheadUsec = 60_000;
+    const adjustedCpuUsec = Math.max(0, rawCpuDeltaUsec - overheadUsec);
+    const durationUsec = cpuDurationMs * 1000;
+    const rawCpuPercent = durationUsec > 0 ? (adjustedCpuUsec / durationUsec) * 100 : 0.0;
+    const containerLimit = 0.5; // container has 0.5 CPU core limit
+    peakCpuPercent = Math.min(100.0, Math.max(0.0, rawCpuPercent / containerLimit));
 
     // -------------------------------------------------------------------------
     // STEP 5b: Flush the Node.js event loop microtask queue
@@ -624,25 +628,25 @@ async function runInDocker(
     //      We try to inspect the container for its exit code and OOM status,
     //      but the container might already be gone (removed by another path
     //      or Docker garbage collection), so we wrap inspection in try/catch.
-    // Stop background stats polling on error
-    pollingActive = false;
-    await pollPromise.catch(() => {});
-
-    // Try to get final stats before we throw, if not already populated
-    if (maxMemory === 0 && container) {
+    // Fetch final cgroup CPU and Memory usage metrics on error
+    if (container) {
       try {
-        const stats = await container.stats({ stream: false });
-        maxMemory = stats.memory_stats?.usage || 0;
-        if (stats.cpu_stats && stats.precpu_stats) {
-          const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-          const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-          const onlineCpus = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
-          if (systemDelta > 0 && cpuDelta > 0) {
-            const cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
-            peakCpuPercent = cpuPercent;
-          }
-        }
-      } catch {}
+        const runEndTime = performance.now();
+        const endMetrics = await getCgroupMetrics(container);
+        maxMemory = endMetrics.memoryBytes;
+        const cpuDurationMs = runEndTime - runStartTime;
+        const rawCpuDeltaUsec = endMetrics.cpuUsec - (startMetrics?.cpuUsec || 0);
+        let overheadUsec = 12_000;
+        if (language === 'python') overheadUsec = 40_000;
+        else if (language === 'javascript') overheadUsec = 60_000;
+        const adjustedCpuUsec = Math.max(0, rawCpuDeltaUsec - overheadUsec);
+        const durationUsec = cpuDurationMs * 1000;
+        const rawCpuPercent = durationUsec > 0 ? (adjustedCpuUsec / durationUsec) * 100 : 0.0;
+        const containerLimit = 0.5;
+        peakCpuPercent = Math.min(100.0, Math.max(0.0, rawCpuPercent / containerLimit));
+      } catch (e) {
+        // ignore
+      }
     }
 
     const durationMs = performance.now() - startTime;

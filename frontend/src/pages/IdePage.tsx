@@ -254,7 +254,12 @@ function IdePage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ code, language: activeFile.language, input: stdinInputs[activeFile.id] || '' }),
+        body: JSON.stringify({
+          code,
+          language: activeFile.language,
+          input: stdinInputs[activeFile.id] || '',
+          fileName: activeFile.name
+        }),
       });
 
       const data = await response.json();

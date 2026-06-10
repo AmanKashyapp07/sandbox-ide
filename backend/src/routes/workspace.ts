@@ -479,7 +479,7 @@ router.delete('/:id/files/:fileId', requireWorkspaceRole('editor'), async (req: 
 router.post('/:id/execute', requireWorkspaceRole('editor'), async (req: WorkspaceAuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
   const userId = req.user?.id;
-  const { code, language, input } = req.body;
+  const { code, language, input, fileName } = req.body;
 
   if (!code || !language) {
     res.status(400).json({ error: 'Code and language are required' });
@@ -506,8 +506,8 @@ router.post('/:id/execute', requireWorkspaceRole('editor'), async (req: Workspac
     try {
       await getPool().query(
         `INSERT INTO execution_history (
-          workspace_id, user_id, language, code_snapshot, output, status, duration_ms, memory_usage_bytes, cpu_usage_percent
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          workspace_id, user_id, language, code_snapshot, output, status, duration_ms, memory_usage_bytes, cpu_usage_percent, file_name
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [
           id,
           userId || null,
@@ -517,7 +517,8 @@ router.post('/:id/execute', requireWorkspaceRole('editor'), async (req: Workspac
           'error',
           0,
           0,
-          0.0
+          0.0,
+          fileName || null
         ]
       );
     } catch (dbErr) {
@@ -532,8 +533,8 @@ router.post('/:id/execute', requireWorkspaceRole('editor'), async (req: Workspac
   try {
     await getPool().query(
       `INSERT INTO execution_history (
-        workspace_id, user_id, language, code_snapshot, output, status, duration_ms, memory_usage_bytes, cpu_usage_percent
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        workspace_id, user_id, language, code_snapshot, output, status, duration_ms, memory_usage_bytes, cpu_usage_percent, file_name
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         id,
         userId || null,
@@ -543,7 +544,8 @@ router.post('/:id/execute', requireWorkspaceRole('editor'), async (req: Workspac
         status,
         Math.round(result.durationMs),
         result.memoryUsageBytes || 0,
-        result.cpuUsagePercent || 0.0
+        result.cpuUsagePercent || 0.0,
+        fileName || null
       ]
     );
   } catch (dbErr) {
@@ -568,7 +570,7 @@ router.get('/:id/execution-history', requireWorkspaceRole('viewer'), async (req:
   try {
     const { id } = req.params;
     const history = await getPool().query(
-      `SELECT eh.id, eh.user_id, u.username, eh.language, eh.status, eh.duration_ms, eh.memory_usage_bytes, eh.cpu_usage_percent, eh.executed_at 
+      `SELECT eh.id, eh.user_id, u.username, eh.language, eh.status, eh.duration_ms, eh.memory_usage_bytes, eh.cpu_usage_percent, eh.file_name, eh.executed_at 
        FROM execution_history eh
        LEFT JOIN users u ON eh.user_id = u.id
        WHERE eh.workspace_id = $1 
