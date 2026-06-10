@@ -102,9 +102,10 @@ function IdePage() {
     const ydoc = new Y.Doc();
     const token = localStorage.getItem('token') || '';
     const wsProvider = new WebsocketProvider(
-      `ws://localhost:4000?token=${token}`,
+      'ws://localhost:4000',
       `workspace-${urlWorkspaceId}`,
-      ydoc
+      ydoc,
+      { params: { token } }
     );
     workspaceWsProviderRef.current = wsProvider;
 

@@ -288,6 +288,7 @@ wss.on('connection', async (ws, req) => {
     const token = parsedUrl.searchParams.get('token');
     
     if (!token) {
+      console.log('[WS] Connection closed: Missing token');
       ws.close(4401, 'Unauthorized: Token required');
       return;
     }
@@ -297,6 +298,7 @@ wss.on('connection', async (ws, req) => {
     try {
       decodedUser = jwt.verify(token, JWT_SECRET);
     } catch (e) {
+      console.log('[WS] Connection closed: Invalid token', e.message);
       ws.close(4401, 'Unauthorized: Invalid token');
       return;
     }
@@ -310,6 +312,7 @@ wss.on('connection', async (ws, req) => {
     // docName is <workspaceId>-<fileId> or workspace-<workspaceId>
     const match = docName.match(/^([0-9a-fA-F-]{36})(-.*)?$/) || docName.match(/^workspace-([0-9a-fA-F-]{36})$/);
     if (!match) {
+      console.log('[WS] Connection closed: Invalid room format:', docName);
       ws.close(4000, 'Bad Request: Invalid room name format');
       return;
     }
@@ -317,6 +320,7 @@ wss.on('connection', async (ws, req) => {
 
     const wsResult = await getPool().query('SELECT owner_id, is_public FROM workspaces WHERE id = $1', [workspaceId]);
     if (wsResult.rows.length === 0) {
+      console.log('[WS] Connection closed: Workspace not found:', workspaceId);
       ws.close(4044, 'Workspace not found');
       return;
     }
@@ -335,6 +339,7 @@ wss.on('connection', async (ws, req) => {
     }
 
     if (!role) {
+      console.log('[WS] Connection closed: Forbidden (no role) for workspace:', workspaceId);
       ws.close(4403, 'Forbidden: You do not have access to this workspace');
       return;
     }

@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 // Extend Express Request type to include user
 export interface AuthRequest extends Request {
@@ -19,6 +18,7 @@ export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction)
   }
 
   try {
+    const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
     const decoded = jwt.verify(token, JWT_SECRET) as { id: string; username: string };
     req.user = decoded;
     next();

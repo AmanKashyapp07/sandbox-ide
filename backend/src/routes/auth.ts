@@ -5,7 +5,6 @@ import { getPool } from '../db';
 
 const router = Router();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 // Register User
 router.post('/register', async (req, res) => {
@@ -30,6 +29,7 @@ router.post('/register', async (req, res) => {
       [username, email, password_hash]
     );
 
+    const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
     const token = jwt.sign({ id: newUser.rows[0].id, username }, JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({ token, user: newUser.rows[0] });
@@ -60,6 +60,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Invalid credentials' });
     }
 
+    const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
     const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
@@ -82,6 +83,7 @@ router.get('/me', async (req, res) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'No token provided' });
 
+    const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     
     const userResult = await getPool().query('SELECT id, username, email FROM users WHERE id = $1', [decoded.id]);

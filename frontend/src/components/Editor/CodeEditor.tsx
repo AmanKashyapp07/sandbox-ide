@@ -53,9 +53,10 @@ export default function CodeEditor({ workspaceId, fileId, language, currentUser,
 
     const token = localStorage.getItem('token') || '';
     const wsProvider = new WebsocketProvider(
-      `ws://localhost:4000?token=${token}`,
+      'ws://localhost:4000',
       roomName,
-      ydoc
+      ydoc,
+      { params: { token } }
     );
 
     wsProvider.on('status', (event: { status: 'connected' | 'disconnected' | 'connecting' }) => {
