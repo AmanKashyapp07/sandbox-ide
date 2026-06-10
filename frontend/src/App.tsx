@@ -10,8 +10,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<AuthPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/ide/:workspaceId" element={<IdePage />} />
-        <Route path="/ide/:workspaceId/:fileId" element={<IdePage />} />
+        <Route path="/ide/:workspaceId/:fileId?" element={<IdePage />} />
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

@@ -9,6 +9,7 @@ import { Play, Zap, Users, Book, LogOut, Loader2, Keyboard } from 'lucide-react'
 import * as Y from 'yjs';
 // @ts-ignore
 import { WebsocketProvider } from 'y-websocket';
+import { io, Socket } from 'socket.io-client';
 
 function IdePage() {
   const [isExecuting, setIsExecuting] = useState(false);
@@ -23,10 +24,12 @@ function IdePage() {
   const [userRole, setUserRole] = useState<'admin' | 'editor' | 'viewer' | null>(null);
   const [activeCollaborators, setActiveCollaborators] = useState<any[]>([]);
   const [isCollabModalOpen, setIsCollabModalOpen] = useState(false);
+  const [isActiveMembersOpen, setIsActiveMembersOpen] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
 
   const editorRef = useRef<any>(null);
   const workspaceWsProviderRef = useRef<any>(null);
+  const presenceSocketRef = useRef<Socket | null>(null);
   const navigate = useNavigate();
   const { workspaceId: urlWorkspaceId, fileId: urlFileId } = useParams<{ workspaceId: string, fileId: string }>();
   
@@ -115,42 +118,40 @@ function IdePage() {
       fetchFiles(urlWorkspaceId);
     });
 
+
     wsProvider.on('status', (event: { status: 'connected' | 'disconnected' | 'connecting' }) => {
       setConnectionStatus(event.status);
     });
 
-    const COLORS = [
-      '#ef4444', '#f97316', '#eab308', '#22c55e',
-      '#06b6d4', '#3b82f6', '#a855f7', '#ec4899',
-    ];
-    const getUserColor = (username: string) => {
-      let hash = 0;
-      for (let i = 0; i < username.length; i++) {
-        hash = username.charCodeAt(i) + ((hash << 5) - hash);
-      }
-      return COLORS[Math.abs(hash) % COLORS.length];
-    };
-
-    wsProvider.awareness.setLocalStateField('user', {
-      name: user.username,
-      color: getUserColor(user.username)
-    });
-
-    const handleAwarenessChange = () => {
-      const states = Array.from(wsProvider.awareness.getStates().entries());
-      const users = states.map(([, state]: any) => state.user).filter(Boolean);
-      const uniqueUsers = Array.from(new Map(users.map(u => [u.name, u])).values());
-      setActiveCollaborators(uniqueUsers);
-    };
-
-    wsProvider.awareness.on('change', handleAwarenessChange);
-    handleAwarenessChange();
-
     return () => {
-      wsProvider.awareness.off('change', handleAwarenessChange);
       wsProvider.destroy();
       ydoc.destroy();
       workspaceWsProviderRef.current = null;
+    };
+  }, [urlWorkspaceId, user]);
+
+  // Socket.IO-based Workspace Presence — instant, no Yjs auth delay
+  useEffect(() => {
+    if (!urlWorkspaceId || !user) return;
+
+    const token = localStorage.getItem('token') || '';
+    const socket = io('http://localhost:4000', {
+      auth: { token },
+    });
+    presenceSocketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('join-workspace', { workspaceId: urlWorkspaceId });
+    });
+
+    socket.on('workspace-presence-update', (users: { username: string; color: string }[]) => {
+      setActiveCollaborators(users);
+    });
+
+    return () => {
+      socket.emit('leave-workspace');
+      socket.disconnect();
+      presenceSocketRef.current = null;
     };
   }, [urlWorkspaceId, user]);
 
@@ -367,34 +368,40 @@ function IdePage() {
               </span>
             </div>
 
-            {/* Upgraded Collaborators Section */}
+            {/* Upgraded Collaborators Section: Button & Dropdown */}
             {activeCollaborators.length > 0 && (
-              <div className="flex items-center mr-2">
-                <div className="flex -space-x-3 transition-all duration-300 hover:space-x-1">
-                  {activeCollaborators.map((collaborator, index) => (
-                    <div
-                      key={collaborator.clientId || index}
-                      className="group relative flex h-8 w-8 cursor-default items-center justify-center rounded-full border-2 border-[#07060b] text-xs font-bold text-white transition-transform hover:z-10 hover:-translate-y-1"
-                      style={{
-                        backgroundColor: collaborator.color || '#8b5cf6',
-                        boxShadow: `0 0 12px ${collaborator.color || '#8b5cf6'}40`
-                      }}
-                    >
-                      {/* Avatar Initials */}
-                      {collaborator.name ? collaborator.name.substring(0, 2).toUpperCase() : '??'}
-
-                      {/* Premium Tooltip */}
-                      <div className="pointer-events-none absolute -bottom-10 left-1/2 z-50 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-zinc-900 px-2.5 py-1.5 text-[11px] font-medium tracking-wide text-zinc-200 opacity-0 shadow-xl transition-all duration-200 group-hover:-translate-y-1 group-hover:opacity-100">
-                        {collaborator.name}
-                        {/* Tooltip Arrow */}
-                        <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-l border-t border-white/10 bg-zinc-900" />
-                      </div>
+              <div className="relative mr-2">
+                <button
+                  onClick={() => setIsActiveMembersOpen(!isActiveMembersOpen)}
+                  className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
+                >
+                  <div className="relative flex h-2 w-2 items-center justify-center">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                  </div>
+                  {activeCollaborators.length} Online
+                </button>
+                
+                {isActiveMembersOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-48 rounded-xl border border-white/10 bg-[#0d0c14] p-2 shadow-2xl z-50">
+                    <div className="mb-2 px-2 pb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 border-b border-white/5">
+                      Active Members
                     </div>
-                  ))}
-                </div>
-                <span className="ml-3 text-[11px] font-medium tracking-wide text-zinc-500">
-                  {activeCollaborators.length} {activeCollaborators.length === 1 ? 'Online' : 'Online'}
-                </span>
+                    <div className="max-h-48 overflow-y-auto flex flex-col gap-1">
+                      {activeCollaborators.map((c, i) => (
+                        <div key={c.username || i} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/5 transition-colors cursor-default">
+                          <div 
+                            className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold text-white border border-white/10"
+                            style={{ backgroundColor: c.color || '#8b5cf6' }}
+                          >
+                            {c.username ? c.username.substring(0, 2).toUpperCase() : '??'}
+                          </div>
+                          <span className="text-xs text-zinc-300 truncate">{c.username || 'Unknown'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

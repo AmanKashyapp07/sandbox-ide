@@ -99,7 +99,7 @@ export default function DashboardPage() {
     e.stopPropagation();
     const isOwner = user?.id === ws.owner_id;
     if (!isOwner) {
-      alert('you are not admin');
+      alert('You are not Admin of this workspace');
       return;
     }
     if (!confirm('Are you sure you want to delete this workspace?')) return;
@@ -123,7 +123,7 @@ export default function DashboardPage() {
     const isOwner = user?.id === ws.owner_id;
     const isAdmin = isOwner || ws.user_role === 'admin';
     if (!isAdmin) {
-      alert('you are not admin');
+      alert('You are not Admin of this workspace');
       return;
     }
     setEditingWorkspaceId(ws.id);

@@ -433,7 +433,83 @@ io.use(async (socket, next) => {
   }
 });
 
+// =============================================================================
+// WORKSPACE PRESENCE TRACKING — In-Memory Map
+// =============================================================================
+// Tracks which users are currently viewing each workspace. Completely
+// independent of Yjs awareness — uses Socket.IO events for instant updates
+// with no auth delay.
+//
+// Structure: Map<workspaceId, Map<socketId, { username, color }>>
+const workspacePresence = new Map<string, Map<string, { username: string; color: string }>>();
+
+const PRESENCE_COLORS = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#06b6d4', '#3b82f6', '#a855f7', '#ec4899',
+];
+
+const getPresenceColor = (username: string) => {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) {
+    hash = username.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return PRESENCE_COLORS[Math.abs(hash) % PRESENCE_COLORS.length];
+};
+
+/**
+ * Broadcasts the full presence list for a workspace to all connected sockets
+ * in that workspace's presence room.
+ */
+const broadcastPresence = (workspaceId: string) => {
+  const members = workspacePresence.get(workspaceId);
+  const users = members ? Array.from(members.values()) : [];
+  io.to(`presence-${workspaceId}`).emit('workspace-presence-update', users);
+};
+
 io.on('connection', (socket) => {
+
+  // =========================================================================
+  // WORKSPACE PRESENCE (join/leave/disconnect)
+  // =========================================================================
+  socket.on('join-workspace', ({ workspaceId }: { workspaceId: string }) => {
+    const user = socket.data.user;
+    if (!user || !workspaceId) return;
+
+    // Track which workspace this socket is in for cleanup on disconnect
+    socket.data.presenceWorkspaceId = workspaceId;
+
+    // Join a Socket.IO room dedicated to presence for this workspace
+    socket.join(`presence-${workspaceId}`);
+
+    // Add user to presence map
+    if (!workspacePresence.has(workspaceId)) {
+      workspacePresence.set(workspaceId, new Map());
+    }
+    const username = (user.username || 'unknown') as string;
+    workspacePresence.get(workspaceId)!.set(socket.id, {
+      username,
+      color: getPresenceColor(username) || '#8b5cf6',
+    });
+
+    // Broadcast updated presence list to ALL users in this workspace
+    broadcastPresence(workspaceId);
+  });
+
+  socket.on('leave-workspace', () => {
+    const workspaceId = socket.data.presenceWorkspaceId;
+    if (!workspaceId) return;
+
+    socket.leave(`presence-${workspaceId}`);
+    const members = workspacePresence.get(workspaceId);
+    if (members) {
+      members.delete(socket.id);
+      if (members.size === 0) {
+        workspacePresence.delete(workspaceId);
+      }
+    }
+    socket.data.presenceWorkspaceId = null;
+    broadcastPresence(workspaceId);
+  });
 
   socket.on('join-voice-room', async ({ workspaceId }) => {
     const user = socket.data.user;
@@ -486,12 +562,24 @@ io.on('connection', (socket) => {
     socket.to(to).emit('webrtc-ice-candidate', { candidate, from: socket.id });
   });
 
-  // When a user disconnects (tab closed, network lost), notify their voice room.
+  // When a user disconnects (tab closed, network lost), clean up everything.
   socket.on('disconnect', () => {
+    // Clean up voice chat
     if (socket.data.workspaceId) {
       io.to(socket.data.workspaceId).emit('user-left-voice', socket.id);
-      // The remaining peers use socket.id to find and close the RTCPeerConnection
-      // they established with this user, removing their audio track from the UI.
+    }
+
+    // Clean up workspace presence
+    const presenceWsId = socket.data.presenceWorkspaceId;
+    if (presenceWsId) {
+      const members = workspacePresence.get(presenceWsId);
+      if (members) {
+        members.delete(socket.id);
+        if (members.size === 0) {
+          workspacePresence.delete(presenceWsId);
+        }
+      }
+      broadcastPresence(presenceWsId);
     }
   });
 });

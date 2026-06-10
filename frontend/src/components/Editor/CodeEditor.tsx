@@ -65,14 +65,15 @@ export default function CodeEditor({ workspaceId, fileId, language, currentUser,
       if (isActive && onConnectionStatusChange) {
         onConnectionStatusChange(event.status);
       }
+      if (isActive && event.status === 'connected') {
+        wsProvider.awareness.setLocalStateField('user', {
+          name: currentUser.username,
+          color: getUserColor(currentUser.username)
+        });
+      }
     };
 
     wsProvider.on('status', handleStatusChange);
-
-    wsProvider.awareness.setLocalStateField('user', {
-      name: currentUser.username,
-      color: getUserColor(currentUser.username)
-    });
 
     const handleAwarenessChange = () => {
       if (!isActive) return;
