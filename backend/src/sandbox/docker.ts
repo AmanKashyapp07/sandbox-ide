@@ -35,34 +35,42 @@ export interface ExecutionResult {
 //   pre-warmed Docker container from the warm pool (see pool.ts). The container
 //   is torn down after every run — each execution is ephemeral.
 //
-// ARCHITECTURE — WARM POOL + EXEC INJECTION:
-//   This engine uses a two-phase approach to achieve sub-100ms execution latency:
+// ARCHITECTURE — WARM POOL + EXEC INJECTION + DYNAMIC HYDRATION:
+//   This engine uses a warm pool combined with dynamic memory-only hydration and
+//   custom execution pipeline routing to process multi-file workspaces under 100ms:
 //
 //   Phase 1 — Pool Pop (handled by pool.ts):
 //     Pre-warmed containers are created at server startup and maintained in a
 //     pool. When a user submits code, we pop an idle container instantly (~0ms)
 //     instead of paying the ~600ms cold-start penalty of docker.createContainer().
 //
-//   Phase 2 — Code Injection + Execution (handled here):
-//     We inject the user's source code into the running container via
-//     `docker exec sh -c 'cat > /app/filename'` (streaming the code over stdin).
-//     Then we execute the language-specific run command via a second `docker exec`.
-//     This avoids bind-mounting host files, which eliminates host filesystem
-//     exposure and removes the need for a temp_sandbox directory.
+//   Phase 2 — In-Memory Multi-File Tar Hydration (handled here):
+//     Rather than writing files to the host OS disk or utilizing bind mounts (which
+//     expose host file structures and suffer from virtualization I/O latency),
+//     we construct a Tar archive entirely in RAM. We run exactly one `docker exec`
+//     channel executing `tar -xf - -C /app` and stream the raw bytes over stdin.
+//     This hydrates the container with all workspace files (including directories)
+//     in a single network socket operation.
 //
-//   ┌─────────────────────────────────────────────────────────────────────┐
-//   │  OLD FLOW (bind-mount, pre-pool):                                   │
-//   │    Write code to temp file → Create container (mount file :ro) →     │
-//   │    Start container → Wait → Read output → Remove container           │
-//   │    Latency: ~600ms container create + ~runtime                       │
-//   │                                                                      │
-//   │  NEW FLOW (warm pool + exec injection):                              │
-//   │    Pop warm container from pool (~0ms) →                             │
-//   │    Exec: inject code via stdin cat > /app/file (~10ms) →             │
-//   │    Exec: run command (~runtime) →                                    │
-//   │    Collect output → Remove container                                 │
-//   │    Latency: ~10–50ms overhead + ~runtime                             │
-//   └─────────────────────────────────────────────────────────────────────┘
+//   Phase 3 — Custom Execution Pipeline Interception:
+//     We look for custom configuration files (`.nexusrun` or `nexus.config.json`)
+//     at the workspace root. If found:
+//       1. Custom Build: Execute the build script first via a hijacked `docker exec`.
+//          If execution fails (exit code !== 0), abort and surface compiler logs.
+//       2. Custom Run: Replace default language run commands with the user's override.
+//     If no config is found, the system executes the language compiler/runner
+//     directly, dynamically re-targeting paths to run the active selection file.
+//
+//   ┌──────────────────────────────────────────────────────────────────────────────┐
+//   │  TRADITIONAL BIND-MOUNT FLOW:                                                │
+//   │    Write to disk → Create container (mount :ro) → Start → Clean up           │
+//   │    Latency: ~600ms container setup + Disk I/O                                │
+//   │                                                                              │
+//   │  MULTI-FILE WORKSPACE TAR HYDRATION FLOW:                                    │
+//   │    Pop warm container (~0ms) → Stream in-memory tarball to `tar -xf`        │
+//   │    (~10ms) → Run custom build (~build) → Exec custom run (~runtime) → Clean   │
+//   │    Latency: ~10ms overhead + build time + execution time                      │
+//   └──────────────────────────────────────────────────────────────────────────────┘
 //
 // WHY DOCKER INSTEAD OF child_process.exec / VM?
 //   - child_process.exec runs code directly on the host OS. A malicious user
@@ -99,6 +107,18 @@ export interface ExecutionResult {
 //   - Hard timeout 10 s                               → no infinite loops
 //   - Output cap 1 MB                                 → no OOM from print loops
 //   - Container removed after every run               → no state leaks between users
+//
+// WHY TAR-STREAM FOR WORKSPACE HYDRATION?
+//   - Packaging: Tar (Tape Archive) is a sequential wrapper format that groups multiple
+//     files/folders into a contiguous byte stream without compression overhead.
+//   - Pipeline Efficiency: Spawning container exec processes has a ~30ms latency penalty.
+//     Rather than calling `docker exec` for every file individually, we construct the entire
+//     workspace as a tar file in Node.js RAM and pipe it over a single exec session.
+//   - Command Breakdown (`tar -xf - -C /app`):
+//       -x   : Instructs tar to extract the contents.
+//       -f - : Reads the input from stdin (standard input stream) directly from the socket.
+//       -C   : Changes the execution path to `/app` inside the container before unpacking,
+//              ensuring relative path paths are mapped correctly.
 //
 // =============================================================================
 
@@ -414,6 +434,14 @@ async function runInDocker(
     // STEP 2: Inject user code into the container via `docker exec`
     // -------------------------------------------------------------------------
     if (workspaceContext && workspaceContext.workspaceFiles.length > 0) {
+      // -------------------------------------------------------------------------
+      // PHASE 2.1: Stream full directory tree using an in-memory tarball pipeline
+      // -------------------------------------------------------------------------
+      // We spawn a single exec command inside the container running 'tar'.
+      // -x: extract files
+      // -f -: read archive content directly from the standard input stream (stdin)
+      // -C /app: extract files inside the /app directory
+      // This allows transferring directories and files in a single exec call with no host files.
       const execWrite = await container.exec({
         Cmd: ['tar', '-xf', '-', '-C', '/app'],
         AttachStdin: true,
@@ -422,30 +450,98 @@ async function runInDocker(
       });
       const writeStream = await execWrite.start({ hijack: true, stdin: true });
       
+      // We pack files dynamically in memory using the tar-stream module
       const pack = tar.pack();
       pack.pipe(writeStream);
       
       for (const file of workspaceContext.workspaceFiles) {
         if (file.type === 'directory') {
+          // Add a directory entry in the tar archive
           pack.entry({ name: file.path, type: 'directory' });
         } else {
+          // Add a file entry with its database/unsaved text contents
           pack.entry({ name: file.path }, file.content || '');
         }
       }
-      pack.finalize();
+      pack.finalize(); // Finalize/close the tarball block stream
       
+      // Wait until the tar command finishes extracting all streamed contents inside the container
       await new Promise<void>((resolve, reject) => {
         writeStream.on('end', () => resolve());
         writeStream.on('error', (err) => reject(err));
       });
 
-      cmd = [...cmd];
-      for (let i = 0; i < cmd.length; i++) {
-        if (cmd[i]) {
-          cmd[i] = cmd[i]!.replace(`/app/${filename}`, `/app/${workspaceContext!.activeFilePath}`);
+      // -------------------------------------------------------------------------
+      // PHASE 2.2: Intercept custom execution configuration (.nexusrun)
+      // -------------------------------------------------------------------------
+      let customConfig: { build?: string; run?: string } | null = null;
+      const configFile = workspaceContext.workspaceFiles.find(f => f.path === '.nexusrun' || f.path === 'nexus.config.json');
+      if (configFile && configFile.content) {
+        try {
+          customConfig = JSON.parse(configFile.content);
+        } catch (err) {
+          console.warn('[docker] Failed to parse custom config:', err);
+        }
+      }
+
+      // -------------------------------------------------------------------------
+      // PHASE 2.3: Handle Custom Compilation/Build Step
+      // -------------------------------------------------------------------------
+      if (customConfig && customConfig.build) {
+        const buildExec = await container.exec({
+          Cmd: ['sh', '-c', customConfig.build],
+          AttachStdout: true,
+          AttachStderr: true,
+          WorkingDir: '/app' // Ensure build runs inside our hydrated project directory root
+        });
+        const buildStream = await buildExec.start({ hijack: true });
+        
+        let buildOutput = '';
+        const buildWritable = new Writable({
+          write(chunk, encoding, callback) {
+            buildOutput += chunk.toString('utf8');
+            callback();
+          }
+        });
+        
+        // Block and stream logs for compilation phase
+        await new Promise<void>((resolve, reject) => {
+          container!.modem.demuxStream(buildStream, buildWritable, buildWritable);
+          buildStream.on('end', () => resolve());
+          buildStream.on('error', (err) => reject(err));
+        });
+
+        // Inspect build command's status. If compilation returns non-zero, fail execution early.
+        const buildInspect = await buildExec.inspect();
+        if (buildInspect.ExitCode !== 0) {
+           throw {
+             killed: false,
+             stdout: '',
+             stderr: buildOutput,
+             message: 'Build failed:\n' + buildOutput,
+             exitCode: buildInspect.ExitCode
+           };
+        }
+      }
+
+      // -------------------------------------------------------------------------
+      // PHASE 2.4: Execute Override or Dynamic Active File Run Path
+      // -------------------------------------------------------------------------
+      if (customConfig && customConfig.run) {
+        // Override execution command with the user-defined run script
+        cmd = ['sh', '-c', customConfig.run];
+      } else {
+        // Fall back to the default command template but dynamically replace
+        // the generic root template name with the actual active file path selection.
+        cmd = [...cmd];
+        for (let i = 0; i < cmd.length; i++) {
+          if (cmd[i]) {
+            cmd[i] = cmd[i]!.replace(`/app/${filename}`, `/app/${workspaceContext!.activeFilePath}`);
+          }
         }
       }
     } else {
+      // Single-file fallback hydration mode: directly stream code bytes into target filename via cat
       const execWrite = await container.exec({
         Cmd: ['sh', '-c', `cat > /app/${filename}`],
         AttachStdin: true,
@@ -476,7 +572,8 @@ async function runInDocker(
       AttachStdin: true,    // Needed to pipe user-provided stdin input
       AttachStdout: true,   // Capture program's stdout
       AttachStderr: true,   // Capture program's stderr (errors, warnings)
-      Tty: false            // Multiplexed stream mode (see frame parser below)
+      Tty: false,           // Multiplexed stream mode (see frame parser below)
+      WorkingDir: '/app'    // Ensure relative paths and custom scripts work seamlessly
     });
 
     const execStream = await execRun.start({
