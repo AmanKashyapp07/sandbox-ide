@@ -1,6 +1,33 @@
 import { useEffect, useState, useMemo } from 'react';
 import { X, Activity, Cpu, Database, RefreshCw, Clock, Terminal, User } from 'lucide-react';
 
+// =============================================================================
+// PERFORMANCE MODAL DIAGNOSTICS COMPONENT
+// =============================================================================
+//
+// INTERVIEW PREP & FRONTEND ARCHITECTURE DESIGN:
+//
+// 1. LIGHTWEIGHT NATIVE SVG CHARTING VS HEAVY CHART LIBRARIES:
+//    - Instead of importing bulky libraries (Recharts, Chart.js) which add hundreds of KB
+//      to the client bundle, we build custom SVG line charts.
+//      This guarantees 100% style compatibility, sub-millisecond render times, and
+//      eliminates complex hydration mismatches during Server-Side Rendering (SSR).
+//
+// 2. MEMOIZATION FOR PATH RENDERING AND REFLECTION (useMemo):
+//    - We partition history processing, unique file extraction, and coordinate-to-path
+//      mapping using React `useMemo`. Hovering over a graph node triggers state changes
+//      (e.g., `hoveredCpuIndex`). Without memoization, hovering would cause a full reflow
+//      and recalculate all SVG path coordinates, introducing rendering lag.
+//
+// 3. EVENT STREAM BUBBLING AND POINTER-EVENTS FLICKER MITIGATION:
+//    - To prevent flickering tooltips, we set `pointer-events: none` on the tooltip
+//      overlay element. This ensures hover triggers target the underlying SVG dots,
+//      avoiding cursor hit-box hijacking when the tooltip renders directly beneath the mouse.
+//
+// 4. DATA PRESENTATION VS DATA PERSISTENCE:
+//    - Raw database statistics (bytes, raw timestamps) are converted in real-time
+//      into user-friendly indicators (e.g., "7.5 MB", "12m ago").
+//
 interface ExecutionHistoryRecord {
   id: string;
   user_id: string | null;

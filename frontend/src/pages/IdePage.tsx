@@ -12,6 +12,30 @@ import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { io, Socket } from 'socket.io-client';
 
+// =============================================================================
+// MAIN COLLABORATIVE IDE CANVAS (IdePage.tsx)
+// =============================================================================
+//
+// INTERVIEW PREP & CENTRAL ARCHITECTURAL PATTERNS:
+//
+// 1. COLLABORATION CORE ARCHITECTURE (Yjs CRDTs + Socket.IO Presence):
+//    - Real-time multiplayer document synchronization is achieved using Yjs (Conflict-free
+//      Replicated Data Types) paired with `WebsocketProvider` to resolve text edit conflict trees.
+//    - A hybrid connection strategy is used: Yjs over WebSockets handle character sync,
+//      while a separate Socket.IO client handles cursor presence, username listings, and user role updates.
+//
+// 2. CLIENT-SIDE RBAC (Role-Based Access Control) ENFORCEMENT:
+//    - Users are assigned roles ('admin', 'editor', 'viewer').
+//    - The frontend mirrors the backend security rules: if `userRole === 'viewer'`, mutation
+//      inputs, folder creations, and code run triggers (`isExecuting`) are locked to prevent
+//      wasted host cycles.
+//
+// 3. STATE SPLITTING FOR MULTI-FILE CODE RUNS:
+//    - Instead of a single output/metrics state, we maintain `fileOutputs` and `fileMetrics`
+//      mapped dynamically by `fileId`. This isolates execution states so the user can switch
+//      between scripts without losing console data or metrics pills of other documents.
+//
+
 function IdePage() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [fileOutputs, setFileOutputs] = useState<Record<string, string>>({});
@@ -258,7 +282,8 @@ function IdePage() {
           code,
           language: activeFile.language,
           input: stdinInputs[activeFile.id] || '',
-          fileName: activeFile.name
+          fileName: activeFile.name,
+          fileId: activeFile.id
         }),
       });
 

@@ -2,6 +2,19 @@ import Docker from 'dockerode';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { Writable } from 'stream';
+import tar from 'tar-stream';
+
+export interface WorkspaceFile {
+  path: string;
+  content: string | null;
+  type: 'file' | 'directory';
+}
+
+export interface WorkspaceContext {
+  workspaceId: string;
+  activeFilePath: string;
+  workspaceFiles: WorkspaceFile[];
+}
 
 export interface ExecutionResult {
   output: string;
@@ -295,7 +308,8 @@ async function getCgroupMetrics(container: Docker.Container): Promise<CgroupMetr
 export async function executeCode(
   code: string,
   language: string,
-  input?: string
+  input?: string,
+  workspaceContext?: WorkspaceContext
 ): Promise<ExecutionResult> {
   const config = CONFIGS[language];
   if (!config) {
@@ -308,7 +322,7 @@ export async function executeCode(
   }
 
   try {
-    const result = await runInDocker(language, code, config.filename, config.cmd, input, 10_000);
+    const result = await runInDocker(language, code, config.filename, config.cmd, input, 10_000, workspaceContext);
     await logRequest(language, code, input, result.output);
     return result;
   } catch (error: any) {
@@ -370,7 +384,8 @@ async function runInDocker(
   filename: string,
   cmd: string[],
   input: string | undefined,
-  timeoutMs: number
+  timeoutMs: number,
+  workspaceContext?: WorkspaceContext
 ): Promise<ExecutionResult> {
   let container: Docker.Container | null = null;
   const startTime = performance.now();
@@ -398,42 +413,54 @@ async function runInDocker(
     // -------------------------------------------------------------------------
     // STEP 2: Inject user code into the container via `docker exec`
     // -------------------------------------------------------------------------
-    // We use `cat > /app/<filename>` to write the code into the container's
-    // tmpfs-backed /app directory. The code is streamed over stdin using
-    // Docker's hijacked stream protocol.
-    //
-    // WHY `cat >` INSTEAD OF `docker cp`?
-    //   `docker cp` requires the Docker daemon to create a tar archive,
-    //   transfer it, and extract it. For a single small file (~1 KB of code),
-    //   the tar overhead is wasteful. `cat >` with stdin streaming is the
-    //   simplest and fastest way to write a single file into a container.
-    //
-    // WHY `hijack: true`?
-    //   Docker's exec API supports two stream modes:
-    //     1. Non-hijacked: Docker handles framing and buffering internally.
-    //        You get a Node.js stream that Docker writes to.
-    //     2. Hijacked: You get raw access to the Docker socket's TCP/Unix
-    //        stream. This lets you write stdin AND read stdout/stderr on
-    //        the same connection (full-duplex). Required when AttachStdin=true.
-    //   We use hijack mode because we need to write the code via stdin.
-    const execWrite = await container.exec({
-      Cmd: ['sh', '-c', `cat > /app/${filename}`],
-      AttachStdin: true,
-      AttachStdout: true,
-      AttachStderr: true
-    });
-    const writeStream = await execWrite.start({ hijack: true, stdin: true });
-    writeStream.write(code);
-    writeStream.end();
+    if (workspaceContext && workspaceContext.workspaceFiles.length > 0) {
+      const execWrite = await container.exec({
+        Cmd: ['tar', '-xf', '-', '-C', '/app'],
+        AttachStdin: true,
+        AttachStdout: true,
+        AttachStderr: true
+      });
+      const writeStream = await execWrite.start({ hijack: true, stdin: true });
+      
+      const pack = tar.pack();
+      pack.pipe(writeStream);
+      
+      for (const file of workspaceContext.workspaceFiles) {
+        if (file.type === 'directory') {
+          pack.entry({ name: file.path, type: 'directory' });
+        } else {
+          pack.entry({ name: file.path }, file.content || '');
+        }
+      }
+      pack.finalize();
+      
+      await new Promise<void>((resolve, reject) => {
+        writeStream.on('end', () => resolve());
+        writeStream.on('error', (err) => reject(err));
+      });
 
-    // Wait for the write stream to fully flush and close.
-    // Without this await, we'd proceed to step 3 before the file is fully
-    // written, causing a race condition where the run command reads a
-    // partially-written or empty file.
-    await new Promise<void>((resolve, reject) => {
-      writeStream.on('end', () => resolve());
-      writeStream.on('error', (err) => reject(err));
-    });
+      cmd = [...cmd];
+      for (let i = 0; i < cmd.length; i++) {
+        if (cmd[i]) {
+          cmd[i] = cmd[i]!.replace(`/app/${filename}`, `/app/${workspaceContext!.activeFilePath}`);
+        }
+      }
+    } else {
+      const execWrite = await container.exec({
+        Cmd: ['sh', '-c', `cat > /app/${filename}`],
+        AttachStdin: true,
+        AttachStdout: true,
+        AttachStderr: true
+      });
+      const writeStream = await execWrite.start({ hijack: true, stdin: true });
+      writeStream.write(code);
+      writeStream.end();
+
+      await new Promise<void>((resolve, reject) => {
+        writeStream.on('end', () => resolve());
+        writeStream.on('error', (err) => reject(err));
+      });
+    }
 
     // Fetch initial cgroup CPU and Memory usage metrics before executing code
     startMetrics = await getCgroupMetrics(container);

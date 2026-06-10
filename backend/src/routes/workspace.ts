@@ -496,18 +496,53 @@ router.delete('/:id/files/:fileId', requireWorkspaceRole('editor'), async (req: 
 router.post('/:id/execute', requireWorkspaceRole('editor'), async (req: WorkspaceAuthRequest, res: Response): Promise<void> => {
   const { id } = req.params;
   const userId = req.user?.id;
-  const { code, language, input, fileName } = req.body;
+  const { code, language, input, fileName, fileId } = req.body as { code: string, language: string, input?: string, fileName?: string, fileId?: string };
 
   if (!code || !language) {
     res.status(400).json({ error: 'Code and language are required' });
     return;
   }
 
+  let workspaceFiles: any[] = [];
+  let activeFilePath = fileName || 'index.js';
+
+  try {
+    const filesRes = await getPool().query(
+      `WITH RECURSIVE file_path_cte AS (
+        SELECT id, parent_id, name, type, content, name::text as path
+        FROM files 
+        WHERE workspace_id = $1 AND parent_id IS NULL
+        UNION ALL
+        SELECT f.id, f.parent_id, f.name, f.type, f.content, (cte.path || '/' || f.name)::text as path
+        FROM files f
+        INNER JOIN file_path_cte cte ON f.parent_id = cte.id
+        WHERE f.workspace_id = $1
+      )
+      SELECT id, parent_id, name, type, content, path FROM file_path_cte;`,
+      [id]
+    );
+    workspaceFiles = filesRes.rows;
+
+    if (fileId) {
+      const activeFileIdx = workspaceFiles.findIndex(f => f.id === fileId);
+      if (activeFileIdx !== -1) {
+        workspaceFiles[activeFileIdx].content = code;
+        activeFilePath = workspaceFiles[activeFileIdx].path;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch workspace files for hydration", err);
+  }
+
   let status: 'success' | 'failed' | 'timeout' | 'error' = 'success';
   let result;
 
   try {
-    result = await executeCode(code, language, input || undefined);
+    result = await executeCode(code, language, input || undefined, {
+      workspaceId: id as string,
+      activeFilePath,
+      workspaceFiles
+    });
     
     if (result.oomKilled) {
       status = 'failed';
