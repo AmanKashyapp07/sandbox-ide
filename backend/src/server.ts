@@ -288,13 +288,25 @@ setPersistence({
 //   initial handshake, enabling true real-time sync (<10ms propagation in
 //   ideal conditions).
 const wss = new WebSocketServer({ noServer: true });
-// Attaching to `server` means the WebSocket server shares port 4000 with
-// Express. Incoming connections are differentiated by the Upgrade header:
-//   Upgrade: websocket → handled by wss
-//   (no Upgrade header) → handled by Express
+// =============================================================================
+// WEBSOCKET UPGRADE ROUTING
+// =============================================================================
 //
-// We handle upgrades manually and filter out Socket.IO upgrade requests.
-// This prevents y-websocket from intercepting and breaking Socket.IO's WebRTC signaling connections.
+// WHY MANUAL UPGRADE HANDLING?
+//   Express handles normal HTTP requests, but WebSocket traffic starts as an
+//   HTTP request with Upgrade: websocket. We intercept the upgrade event
+//   ourselves so one server can multiplex REST, Yjs sync, terminal shells,
+//   and Socket.IO signaling on the same port.
+//
+// ROUTING RULES:
+//   - /terminal/<workspaceId> → interactive terminal handler
+//   - /socket.io/*            → Socket.IO signaling path
+//   - everything else         → Express / Yjs handling
+//
+// WHY FILTER SOCKET.IO HERE?
+//   Socket.IO also relies on HTTP upgrades. If y-websocket or the terminal
+//   handler grabbed those requests first, it could break WebRTC signaling.
+//   The early return keeps each protocol isolated to its own connection path.
 server.on('upgrade', (request, socket, head) => {
   const parsedUrl = new URL(request.url || '', `http://${request.headers.host || 'localhost'}`);
   if (parsedUrl.pathname.startsWith('/socket.io/')) {
@@ -309,17 +321,21 @@ wss.on('connection', async (ws, req) => {
   try {
     const parsedUrl = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
     
-    // -------------------------------------------------------------------------
-    // ROUTE: Terminal sessions (/terminal/<workspaceId>)
-    // -------------------------------------------------------------------------
+    // =============================================================================
+    // ROUTE: TERMINAL WEBSOCKET SESSIONS
+    // =============================================================================
+    //
+    // Terminal sessions are long-lived and stateful, so they are routed before
+    // any collaborative-editing logic. The handler validates JWTs, hydrates a
+    // warm container, and bridges the browser terminal UI to Docker exec.
     if (parsedUrl.pathname.startsWith('/terminal/')) {
       await handleTerminalConnection(ws, req);
       return;
     }
 
-    // -------------------------------------------------------------------------
-    // ROUTE: Yjs collaborative editing (existing paths)
-    // -------------------------------------------------------------------------
+    // =============================================================================
+    // ROUTE: YJS COLLABORATIVE EDITING
+    // =============================================================================
     const token = parsedUrl.searchParams.get('token');
     
     if (!token) {

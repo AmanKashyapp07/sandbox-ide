@@ -447,7 +447,14 @@ router.post('/:id/files', requireWorkspaceRole('editor'), async (req: WorkspaceA
     );
     const createdFile = newFile.rows[0];
 
-    // Background sync to terminal
+    // =============================================================================
+    // LIVE TERMINAL SYNCHRONIZATION
+    // =============================================================================
+    //
+    // WHY FIRE-AND-FORGET?
+    //   Workspace edits should stay responsive to the user. We mirror file
+    //   system changes into any active terminal container in the background so
+    //   shell commands see the same tree without slowing down the editor.
     if (type === 'directory') {
       getPool().query(
         `WITH RECURSIVE file_path_cte AS (
@@ -511,7 +518,8 @@ router.delete('/:id/files/:fileId', requireWorkspaceRole('editor'), async (req: 
   try {
     const { id, fileId } = req.params;
 
-    // Fetch path before delete
+    // Read the path before deletion so the terminal container can remove the
+    // same file or folder after the database change succeeds.
     const pathResult = await getPool().query(
       `WITH RECURSIVE file_path_cte AS (
         SELECT id, parent_id, name, name::text as path
@@ -529,7 +537,7 @@ router.delete('/:id/files/:fileId', requireWorkspaceRole('editor'), async (req: 
 
     await getPool().query('DELETE FROM files WHERE id = $1 AND workspace_id = $2', [fileId, id]);
 
-    // Sync deletion to terminal in the background if path was found
+    // Mirror the delete into the terminal container after the DB transaction.
     if (pathResult.rows.length > 0) {
       const filePath = pathResult.rows[0].path;
       syncDeleteToTerminal(id as string, filePath).catch((err) => {

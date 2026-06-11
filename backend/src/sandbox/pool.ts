@@ -108,12 +108,22 @@ export interface WarmContainer {
 //   request rate per language (e.g., POOL_SIZE = ceil(RPS * avg_create_time)).
 const POOL_SIZE = 2;
 
-// Terminal sessions use a smaller dedicated pool since they hold containers
-// for the entire session duration (minutes) vs code execution (seconds).
-// The pool dynamically adjusts based on active sessions.
-const TERMINAL_POOL_MIN = 1;  // Minimum containers to keep warm
-const TERMINAL_POOL_MAX = 5;  // Maximum containers to pre-warm
-let TERMINAL_POOL_SIZE = 2;   // Current target size (dynamic)
+// =============================================================================
+// TERMINAL POOL CONFIGURATION
+// =============================================================================
+//
+// WHY A SEPARATE POOL FOR TERMINALS?
+//   Interactive terminals are held open for minutes, not seconds. That means
+//   their containers are occupied much longer than code-execution containers,
+//   so the pool needs its own sizing policy and replenishment strategy.
+//
+// POOL SIZE POLICY:
+//   - MIN: keeps at least one container warm so the first shell is instant
+//   - MAX: caps idle memory usage when many terminals are open
+//   - TARGET: grows/shrinks with the number of active sessions
+const TERMINAL_POOL_MIN = 1;
+const TERMINAL_POOL_MAX = 5;
+let TERMINAL_POOL_SIZE = 2;
 
 // Languages for which we pre-warm containers.
 // This must be kept in sync with CONFIGS in docker.ts.
@@ -132,7 +142,9 @@ const IMAGE_CONFIGS: Record<string, string> = {
   bash: 'alpine:3.18'
 };
 
-// Terminal pool uses a generic Alpine image - no language-specific tooling needed
+// Terminal terminals only need a shell and core utilities, so Alpine is enough.
+// No compiler toolchains are required because the terminal handler executes
+// whatever is already present inside the user's hydrated workspace.
 const TERMINAL_IMAGE = 'alpine:3.18';
 
 // =============================================================================
@@ -155,10 +167,10 @@ class WarmPoolManager {
   // container age distribution and keeps idle resource usage predictable.
   private pools: Record<string, WarmContainer[]> = {};
 
-  // Separate dedicated pool for terminal sessions
+  // Dedicated pool for interactive terminal sessions.
   private terminalPool: WarmContainer[] = [];
   
-  // Track active terminal sessions to optimize pool size
+  // Track active terminal sessions so we can scale the warm pool target size.
   private activeTerminalSessions = 0;
 
   // Concurrency guard: prevents parallel fillPool() calls for the same
@@ -389,9 +401,11 @@ class WarmPoolManager {
   // ---------------------------------------------------------------------------
   // PUBLIC: Pop a terminal container for interactive shell sessions
   // ---------------------------------------------------------------------------
-  // Called by terminal handler when a user opens a terminal.
-  // Terminal containers are held for the duration of the session (minutes),
-  // unlike code execution containers which are single-use (seconds).
+  //
+  // WHY THIS IS DIFFERENT FROM code execution:
+  //   Terminal containers stay attached to a WebSocket session for as long as
+  //   the user keeps the shell open. We therefore keep them warm, but we also
+  //   replenish and resize the pool more conservatively than the execution path.
   public async popTerminalContainer(): Promise<WarmContainer> {
     // Increment active session counter for dynamic pool sizing
     this.activeTerminalSessions++;
@@ -401,7 +415,7 @@ class WarmPoolManager {
       console.warn('[WarmPool] Terminal pool is empty! Falling back to on-demand container creation.');
       const container = await this.createTerminalContainer();
       
-      // Trigger aggressive replenishment when pool is exhausted
+      // If the pool is empty, replenish immediately so the next session is warm.
       this.fillTerminalPool().catch((err) => {
         console.error('[WarmPool] Failed to replenish terminal pool:', err.message);
       });
@@ -411,7 +425,7 @@ class WarmPoolManager {
 
     const warmContainer = this.terminalPool.shift()!;
 
-    // Trigger background replenishment
+    // Refill in the background so the next terminal connect stays fast.
     this.fillTerminalPool().catch((err) => {
       console.error('[WarmPool] Failed to replenish terminal pool:', err.message);
     });
@@ -432,8 +446,11 @@ class WarmPoolManager {
   // ---------------------------------------------------------------------------
   // PRIVATE: Dynamically adjust terminal pool target size
   // ---------------------------------------------------------------------------
-  // Adjusts pool size based on active sessions to balance responsiveness
-  // with resource usage. Formula: target = active + 2 (clamped to min/max)
+  //
+  // WHY active + 2?
+  //   Keeping a small buffer ahead of current demand gives us room for the
+  //   next connection without overshooting memory usage. The clamp preserves
+  //   a floor and ceiling so the pool stays predictable under burst traffic.
   private adjustTerminalPoolSize(): void {
     const previousSize = TERMINAL_POOL_SIZE;
     
@@ -450,7 +467,7 @@ class WarmPoolManager {
       );
       TERMINAL_POOL_SIZE = targetSize;
       
-      // Trigger replenishment if we need more containers
+      // Grow the pool immediately when demand rises.
       if (targetSize > previousSize) {
         this.fillTerminalPool().catch((err) => {
           console.error('[WarmPool] Failed to expand terminal pool:', err.message);
@@ -480,7 +497,10 @@ class WarmPoolManager {
   // ---------------------------------------------------------------------------
   // PRIVATE: Create a single terminal container
   // ---------------------------------------------------------------------------
-  // Terminal containers use Alpine with a shell - no language-specific tools needed.
+  //
+  // Terminal containers only need a shell and a minimal filesystem. Alpine
+  // keeps the image small and the cold-start path fast while still supporting
+  // the `/bin/sh` session spawned by terminalHandler.ts.
   private async createTerminalContainer(): Promise<WarmContainer> {
     const container = await docker.createContainer({
       Image: TERMINAL_IMAGE,
@@ -548,7 +568,7 @@ class WarmPoolManager {
       }
     }
 
-    // Clean up terminal pool
+    // Clean up terminal pool separately because it uses its own sizing policy.
     while (this.terminalPool.length > 0) {
       const warm = this.terminalPool.shift()!;
       try {

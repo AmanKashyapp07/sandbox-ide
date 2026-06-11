@@ -74,7 +74,10 @@ interface TerminalSession {
   ws: WebSocket;
   container: Docker.Container;
   exec: Docker.Exec;
-  stream: NodeJS.ReadWriteStream;
+  stream: NodeJS.ReadWriteStream & {
+    destroyed?: boolean;
+    destroy?: () => void;
+  };
   idleTimeout: NodeJS.Timeout;
   workspaceId: string;
   userId: string;
@@ -84,13 +87,19 @@ interface TerminalSession {
   teardownTimeout?: NodeJS.Timeout;
 }
 
-// Track active sessions to prevent multiple terminals per user-workspace
+// =============================================================================
+// SESSION STATE
+// =============================================================================
+//
+// We keep only one active terminal per user-workspace pair. That prevents two
+// shells from racing against the same workspace state and keeps reconnection
+// behavior deterministic.
 const activeSessions = new Map<string, TerminalSession>();
 
-// Idle timeout: 10 minutes of no activity → auto-close
+// Idle timeout: 10 minutes of no activity → auto-close.
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
-// Reconnection grace period: 15 seconds to reload/reconnect
+// Reconnection grace period: 15 seconds to reload/reconnect.
 const RECONNECT_GRACE_PERIOD_MS = 15000;
 
 // =============================================================================
@@ -125,6 +134,8 @@ interface AuditLog {
   details?: string;
 }
 
+type TerminalRole = 'viewer' | 'editor' | 'admin';
+
 const auditLogs: AuditLog[] = [];
 const MAX_AUDIT_LOGS = 10000; // Keep last 10k events in memory
 
@@ -133,9 +144,12 @@ function logAuditEvent(userId: string, workspaceId: string, event: AuditLog['eve
     timestamp: new Date(),
     userId,
     workspaceId,
-    event,
-    details
+    event
   };
+
+  if (details !== undefined) {
+    log.details = details;
+  }
   
   auditLogs.push(log);
   
@@ -196,7 +210,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
 
   try {
     // -------------------------------------------------------------------------
-    // STEP 1: Parse the WebSocket URL and extract workspace ID
+    // STEP 1: Parse the terminal URL and extract workspace context
     // -------------------------------------------------------------------------
     const parsedUrl = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
     const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
@@ -207,7 +221,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       return;
     }
 
-    const workspaceId = pathParts[1];
+    const workspaceId = pathParts[1] as string;
     const token = parsedUrl.searchParams.get('token');
     const forceNew = parsedUrl.searchParams.get('forceNew') === 'true';
 
@@ -230,7 +244,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       return;
     }
 
-    const userId = decodedUser.id;
+    const userId = typeof decodedUser.id === 'string' ? decodedUser.id : String(decodedUser.id || '');
     if (!userId) {
       console.log('[Terminal] Connection closed: No user ID in token');
       ws.close(4401, 'Unauthorized: Invalid token payload');
@@ -240,7 +254,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     // -------------------------------------------------------------------------
     // STEP 3: Check workspace access and role
     // -------------------------------------------------------------------------
-    // Terminal access requires editor role or above (same as code execution)
+    // Terminal access requires editor role or above (same as code execution).
     const wsResult = await getPool().query(
       'SELECT owner_id, is_public FROM workspaces WHERE id = $1',
       [workspaceId]
@@ -253,7 +267,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     }
 
     const workspace = wsResult.rows[0];
-    let userRole: string | null = null;
+    let userRole: TerminalRole | null = null;
 
     if (workspace.owner_id === userId) {
       userRole = 'admin';
@@ -263,7 +277,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
         [workspaceId, userId]
       );
       if (collabResult.rows.length > 0) {
-        userRole = collabResult.rows[0].role;
+        userRole = collabResult.rows[0].role as TerminalRole;
       } else if (workspace.is_public) {
         userRole = 'viewer';
       }
@@ -276,17 +290,17 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     }
 
     // Viewers cannot open terminals (same policy as code execution)
-    const roleHierarchy: Record<string, number> = { viewer: 1, editor: 2, admin: 3 };
-    if (roleHierarchy[userRole] < roleHierarchy['editor']) {
+    const roleHierarchy: Record<TerminalRole, number> = { viewer: 1, editor: 2, admin: 3 };
+    if (roleHierarchy[userRole] < roleHierarchy.editor) {
       console.log('[Terminal] Connection closed: Insufficient role');
       ws.close(4403, 'Forbidden: Editor role required for terminal access');
       return;
     }
 
     // -------------------------------------------------------------------------
-    // STEP 4: Check for existing session and close it
+    // STEP 4: Enforce the one-terminal-per-workspace rule
     // -------------------------------------------------------------------------
-    // Only allow one terminal per user-workspace combination
+    // Only allow one terminal per user-workspace combination.
     const sessionKey = `${userId}-${workspaceId}`;
     const existingSession = activeSessions.get(sessionKey);
     if (existingSession) {
@@ -294,21 +308,21 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
         console.log('[Terminal] Reconnecting to existing active session for', sessionKey);
         if (existingSession.teardownTimeout) {
           clearTimeout(existingSession.teardownTimeout);
-          existingSession.teardownTimeout = undefined;
+          delete existingSession.teardownTimeout;
         }
         existingSession.isReconnecting = false;
         existingSession.ws = ws;
 
-        // Replay history
+        // Replay cached output so a reconnecting client sees the recent shell state.
         const history = existingSession.historyBuffer.getCombined();
         if (history.length > 0) {
           ws.send(history);
         }
 
-        // Bind websocket event listeners for the new socket
+        // Rebind socket listeners to the newly attached WebSocket instance.
         bindWebSocketEvents(existingSession, ws, sessionKey);
 
-        // Reset the idle timeout
+        // Reset the idle timeout because the session is active again.
         const resetIdleTimeout = () => {
           clearTimeout(existingSession.idleTimeout);
           existingSession.idleTimeout = setTimeout(() => {
@@ -319,7 +333,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
         };
         resetIdleTimeout();
 
-        // Log successful reconnection
+        // Record the reconnect for audit visibility.
         logAuditEvent(userId, workspaceId, 'connect', 'Reconnected successfully');
         console.log('[Terminal] Session reconnected for workspace:', workspaceId);
         return;
@@ -331,7 +345,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     }
 
     // -------------------------------------------------------------------------
-    // STEP 5: Load workspace files for hydration
+    // STEP 5: Load workspace files for container hydration
     // -------------------------------------------------------------------------
     const filesRes = await getPool().query(
       `WITH RECURSIVE file_path_cte AS (
@@ -401,7 +415,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       WorkingDir: '/app'   // Start shell in workspace directory
     });
 
-    const stream = await exec.start({ hijack: true, stdin: true }) as NodeJS.ReadWriteStream;
+    const stream = await exec.start({ hijack: true, stdin: true }) as TerminalSession['stream'];
 
     // -------------------------------------------------------------------------
     // STEP 9: Set up idle timeout
@@ -423,7 +437,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       flushTimer: null
     };
 
-    // Flush buffered output to WebSocket
+    // Flush buffered output to the active WebSocket in batched chunks.
     const flushOutputBuffer = () => {
       if (outputBuffer.chunks.length === 0) return;
 
@@ -439,7 +453,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       outputBuffer.flushTimer = null;
     };
 
-    // Add chunk to buffer with automatic flushing
+    // Buffer each chunk and flush either on size threshold or timer expiry.
     const bufferOutput = (chunk: Buffer) => {
       outputBuffer.chunks.push(chunk);
       outputBuffer.totalBytes += chunk.length;
@@ -460,13 +474,13 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       }
     };
 
-    // Create history buffer
+    // Cache recent output so reconnecting sessions can catch up instantly.
     const historyBuffer = new TerminalHistoryBuffer();
 
     // -------------------------------------------------------------------------
     // STEP 11: Create session object and store it
     // -------------------------------------------------------------------------
-    session = {
+    const currentSession: TerminalSession = {
       ws,
       container,
       exec,
@@ -477,9 +491,10 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       outputBuffer,
       historyBuffer
     };
-    activeSessions.set(sessionKey, session);
+    session = currentSession;
+    activeSessions.set(sessionKey, currentSession);
 
-    // Log successful connection
+    // Log successful connection for audit visibility.
     logAuditEvent(userId, workspaceId, 'connect', `Role: ${userRole}`);
 
     // -------------------------------------------------------------------------
@@ -489,7 +504,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       if (session) {
         session.historyBuffer.push(chunk);
       }
-      bufferOutput(chunk); // Use rate-limited buffer instead of direct send
+      bufferOutput(chunk); // Rate-limited batching keeps the browser responsive.
     });
 
     stream.on('end', () => {
@@ -509,7 +524,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     // -------------------------------------------------------------------------
     // STEP 13: Bind WebSocket event listeners
     // -------------------------------------------------------------------------
-    bindWebSocketEvents(session, ws, sessionKey);
+    bindWebSocketEvents(currentSession, ws, sessionKey);
 
     console.log('[Terminal] Session established for workspace:', workspaceId);
 
@@ -536,7 +551,7 @@ async function cleanupSession(session: TerminalSession): Promise<void> {
 
     if (session.stream && !session.stream.destroyed) {
       session.stream.end();
-      session.stream.destroy();
+      session.stream.destroy?.();
     }
 
     if (session.container) {
@@ -544,8 +559,7 @@ async function cleanupSession(session: TerminalSession): Promise<void> {
         console.error('[Terminal] Failed to remove container:', err.message);
       });
       
-      // Notify pool manager that a terminal session has ended
-      // This triggers dynamic pool size adjustment based on active sessions
+      // Notify the pool manager so it can shrink or refill the terminal pool.
       warmPoolManager.releaseTerminalContainer();
     }
 
@@ -615,7 +629,7 @@ export async function syncDeleteToTerminal(workspaceId: string, filePath: string
     const exec = await session.container.exec({
       Cmd: ['rm', '-rf', `/app/${filePath}`]
     });
-    await exec.start();
+    await exec.start({ hijack: true, stdin: false });
     console.log(`[TerminalSync] Automatically deleted /app/${filePath} inside active container`);
   } catch (err: any) {
     console.error('[TerminalSync] Failed to sync file deletion:', err.message);
@@ -632,7 +646,7 @@ export async function syncFolderToTerminal(workspaceId: string, folderPath: stri
     const exec = await session.container.exec({
       Cmd: ['mkdir', '-p', `/app/${folderPath}`]
     });
-    await exec.start();
+    await exec.start({ hijack: true, stdin: false });
     console.log(`[TerminalSync] Automatically created folder /app/${folderPath} inside active container`);
   } catch (err: any) {
     console.error('[TerminalSync] Failed to sync folder creation:', err.message);
