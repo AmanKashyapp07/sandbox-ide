@@ -431,7 +431,11 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       AttachStderr: true,
       WorkingDir: '/app',  // Start shell in workspace directory
       Env: [
-        'PS1=\\[\\033[1;35m\\]\\u@sandbox\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[1;32m\\]\\$\\[\\033[0m\\] '
+        'PS1=\\[\\033[1;35m\\]\\u@sandbox\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[1;32m\\]\\$\\[\\033[0m\\] ',
+        `HISTFILE=/history/history-${workspaceId}`,
+        'PROMPT_COMMAND=history -a',
+        'HISTSIZE=2000',
+        'HISTFILESIZE=2000'
       ]
     });
 

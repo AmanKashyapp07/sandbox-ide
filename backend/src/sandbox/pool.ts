@@ -1,5 +1,5 @@
 import Docker from 'dockerode';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import * as path from 'path';
 import { execSync } from 'child_process';
 
@@ -548,6 +548,15 @@ WORKDIR /app
   // keeps the image small and the cold-start path fast while still supporting
   // the `/bin/sh` session spawned by terminalHandler.ts.
   private async createTerminalContainer(): Promise<WarmContainer> {
+    const HISTORY_DIR = path.join('/Users/amankashyap/Documents/sandbox/backend', 'terminal_history');
+    if (!existsSync(HISTORY_DIR)) {
+      try {
+        mkdirSync(HISTORY_DIR, { recursive: true });
+      } catch (err: any) {
+        console.error('[WarmPool] Failed to create terminal history directory:', err.message);
+      }
+    }
+
     const container = await docker.createContainer({
       Image: TERMINAL_IMAGE,
       Cmd: ['sh', '-c', 'sleep infinity'],
@@ -561,7 +570,10 @@ WORKDIR /app
         Tmpfs: {
           '/app': 'rw,exec,size=10m',
           '/tmp': 'rw,exec,size=10m'
-        }
+        },
+        Binds: [
+          `${HISTORY_DIR}:/history`
+        ]
       },
       AttachStdin: true,
       AttachStdout: true,
