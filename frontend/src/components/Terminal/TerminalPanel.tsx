@@ -189,7 +189,7 @@ export default function TerminalPanel({ workspaceId }: TerminalPanelProps) {
           <button 
             onClick={handleReconnect}
             className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-white/5 hover:text-zinc-200"
-            title="Restart Session"
+            title="Reconnect Session: Restarts the socket connection (retains active container and files)"
           >
             <RefreshCw size={16} className={connectionStatus === 'connecting' ? 'animate-spin' : ''} />
           </button>

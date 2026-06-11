@@ -31,6 +31,13 @@ Architected from first principles, this platform solves two critical distributed
 * **In-Memory Tar Archiving & Hydration:** To support multi-file imports and module dependencies without host bind-mounting, the database files are pulled recursively via a Common Table Expression (CTE) and packaged into an in-memory tar stream, which is piped directly into `tar -xf - -C /app` in the sandbox container before code execution.
 * **Custom Run Configuration Overlays:** Enables users to specify custom execution and compilation scripts via `.nexusrun` or `nexus.config.json` files in the workspace root, bypassing default single-file executors.
 
+### 5. Multi-Tenant Interactive Terminal Sandbox & Watcher Sync
+* **Pseudo-Terminal (PTY) Allocations**: Allocates interactive shell sessions running `/bin/bash` with `Tty: true`. This prevents Docker's standard stream multiplexing headers from leaking, delivering raw ANSI escapes directly to xterm.js for full ANSI coloring and interactive prompt formatting.
+* **Pre-warmed Container Pool Scaling**: Manages a pre-warmed Alpine container pool (`sandbox-dev-env:latest`) that dynamically scales pool size targeting `activeSessions + 2` warm containers, bounded between `1` and `5` containers.
+* **Pre-installed Sandbox Developer Tools**: Dynamic compiler and runtime verification at boot. If `sandbox-dev-env:latest` does not exist, the pool manager dynamically builds it, installing Node.js, NPM, Python3, Pip, G++, GCC, Make, Git, Curl, and Bash.
+* **Bidirectional Filesystem Watcher**: Couples editor-to-container updates (forward write/delete execution) with container-to-editor updates (reverse sync). A background Stat watcher scans `/app` folder metadata changes every 1.5 seconds, synchronizes differences to the database and Yjs states, and triggers Socket.io tree refreshes.
+* **Smart Session Control & Resizing**: Fixed layout containers (KISS principle) keep the IDE interface clean and predictable. WebSocket stream filters protect browsers from crash loops by buffering outputs and flushing them in 50ms batches.
+
 ---
 
 ## 🏗 Tech Stack
@@ -87,10 +94,17 @@ Architected from first principles, this platform solves two critical distributed
 * [x] Multiplex output streams (`stdout`/`stderr`) dynamically to push compiler updates over WebSockets in real time.
 * [x] **Live Performance Diagnostics Panel**: Retrieve real-time cgroups v2 CPU and memory statistics with sub-20ms latency, cancel process initialization overhead, and display visual HSL tailored graphs and tabular execution logs.
 
-### Milestone 4: Multi-File Workspace Execution & Custom Configurations (In Progress)
+### Milestone 4: Multi-File Workspace Execution & Custom Configurations (Complete)
 
-* [ ] **Pre-Execution Workspace Hydration**: Retrieve workspace folder/file hierarchies recursively using Recursive CTEs and stream them into the sandbox container via in-memory tar archiving.
-* [ ] **Custom Execution Config overlays**: Add support for `.nexusrun` or `nexus.config.json` custom compilation/run commands inside the sandbox root.
+* [x] **Pre-Execution Workspace Hydration**: Retrieve workspace folder/file hierarchies recursively using Recursive CTEs and stream them into the sandbox container via in-memory tar archiving.
+* [x] **Custom Execution Config overlays**: Add support for `.nexusrun` or `nexus.config.json` custom compilation/run commands inside the sandbox root.
+
+### Milestone 5: Interactive Web Terminals & Developer Environments (Complete)
+
+* [x] **WebSockets & PTY Integration**: Integrated xterm.js with WebSocket relays and docker exec PTY sessions.
+* [x] **Warm Terminal Pool Scaling**: Implemented dynamic container pool scaling and lifecycle handlers.
+* [x] **Preloaded Developer Runtimes**: Implemented dynamic `sandbox-dev-env:latest` build triggers on server boot (GCC, Node, Python, Git, Curl, Bash).
+* [x] **Smart Sync & Session Recovery**: Reconnect session loops preserve state while Reset Sandbox triggers recycle environment rebuilds.
 
 ---
 

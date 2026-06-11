@@ -653,10 +653,10 @@ function IdePage() {
                           setTerminalKey(prev => prev + 1);
                         }}
                         className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-medium text-zinc-400 transition-colors hover:bg-white/5 hover:text-zinc-200"
-                        title="Restart terminal with latest workspace files"
+                        title="Reset Sandbox: Re-hydrates workspace files and starts a fresh container (loses unsaved container state)"
                       >
                         <RotateCcw size={10} />
-                        New Terminal
+                        Reset Sandbox
                       </button>
                     )}
                   </div>
