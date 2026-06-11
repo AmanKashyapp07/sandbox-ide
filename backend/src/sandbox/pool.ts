@@ -155,7 +155,7 @@ const IMAGE_CONFIGS: Record<string, string> = {
 };
 
 // Terminal sandbox dev environment image pre-installed with Node, NPM, Python, GCC, Git, Curl, Bash
-const TERMINAL_IMAGE = 'sandbox-dev-env:latest';
+const TERMINAL_IMAGE = 'sandbox-dev-env:v2';
 
 // =============================================================================
 // WARM POOL MANAGER
@@ -223,12 +223,12 @@ class WarmPoolManager {
   //   The server still starts — failed languages will fall back to on-demand
   //   container creation (slower but functional).
   private async ensureTerminalImageExists(): Promise<void> {
-    const imageName = 'sandbox-dev-env:latest';
+    const imageName = 'sandbox-dev-env:v2';
     try {
       await docker.getImage(imageName).inspect();
       console.log('[WarmPool] Terminal developer sandbox image is already built and ready.');
     } catch (err) {
-      console.log('[WarmPool] sandbox-dev-env:latest does not exist, building image now...');
+      console.log('[WarmPool] sandbox-dev-env:v2 does not exist, building image now...');
       const dockerfileContent = `FROM alpine:3.18
 RUN apk add --no-cache \
     nodejs \
@@ -242,10 +242,17 @@ RUN apk add --no-cache \
     git \
     curl \
     bash
+RUN mkdir -p /viewer_bin && \
+    ln -s /bin/busybox /viewer_bin/ls && \
+    ln -s /bin/busybox /viewer_bin/cat && \
+    ln -s /bin/busybox /viewer_bin/echo && \
+    ln -s /bin/busybox /viewer_bin/pwd && \
+    ln -s /bin/busybox /viewer_bin/clear && \
+    ln -s /bin/busybox /viewer_bin/grep
 WORKDIR /app
 `;
       try {
-        execSync('docker build -t sandbox-dev-env:latest -', { input: dockerfileContent, stdio: 'pipe' });
+        execSync('docker build -t sandbox-dev-env:v2 -', { input: dockerfileContent, stdio: 'pipe' });
         console.log('[WarmPool] Terminal developer sandbox image built successfully.');
       } catch (buildErr: any) {
         console.error('[WarmPool] Failed to build custom terminal developer sandbox image:', buildErr.message);

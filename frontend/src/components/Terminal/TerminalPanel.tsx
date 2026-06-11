@@ -47,8 +47,7 @@ export default function TerminalPanel({ workspaceId, userRole }: TerminalPanelPr
     fitAddonRef.current = fitAddon;
 
     const terminal = new XTerm({
-      cursorBlink: userRole !== 'viewer',
-      disableStdin: userRole === 'viewer',
+      cursorBlink: true,
       fontSize: 13,
       fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
       rows: 30,
@@ -163,7 +162,7 @@ export default function TerminalPanel({ workspaceId, userRole }: TerminalPanelPr
         <div className="flex items-center gap-3">
           <TerminalIcon size={16} className="text-violet-400" />
           <span className="font-mono text-xs font-semibold tracking-wider text-zinc-300">
-            BASH {userRole === 'viewer' && <span className="text-violet-400/80 font-sans text-[10px] tracking-normal font-medium ml-1.5 uppercase">(Read-Only)</span>}
+            BASH {userRole === 'viewer' && <span className="text-violet-400/80 font-sans text-[10px] tracking-normal font-medium ml-1.5 uppercase">(Restricted)</span>}
           </span>
           
           {/* Status Dot */}

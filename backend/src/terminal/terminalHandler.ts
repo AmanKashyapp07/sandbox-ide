@@ -195,11 +195,6 @@ function bindWebSocketEvents(
   ws.on('message', (messageData: any) => {
     resetIdleTimeout();
 
-    // Drop all input data if the session is read-only (viewer role)
-    if (session.role === 'viewer') {
-      return;
-    }
-
     const data = Buffer.isBuffer(messageData) ? messageData : Buffer.from(messageData);
 
     // Forward raw bytes directly to stdin
@@ -429,21 +424,27 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     // -------------------------------------------------------------------------
     // STEP 8: Spawn an interactive shell with PTY
     // -------------------------------------------------------------------------
-    console.log('[Terminal] Spawning interactive shell');
+    const isViewer = userRole === 'viewer';
+    const execCmd = isViewer ? ['/bin/bash', '-r'] : ['/bin/bash'];
+    const execEnv = [
+      'PS1=\\[\\033[1;35m\\]\\u@sandbox\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[1;32m\\]\\$\\[\\033[0m\\] ',
+      `HISTFILE=/history/history-${workspaceId}`,
+      'PROMPT_COMMAND=history -a',
+      'HISTSIZE=2000',
+      'HISTFILESIZE=2000'
+    ];
+    if (isViewer) {
+      execEnv.push('PATH=/viewer_bin');
+    }
+
     const exec = await container.exec({
-      Cmd: ['/bin/bash'],
+      Cmd: execCmd,
       Tty: true,           // Allocate a pseudo-terminal (PTY) inside the container
       AttachStdin: true,
       AttachStdout: true,
       AttachStderr: true,
       WorkingDir: '/app',  // Start shell in workspace directory
-      Env: [
-        'PS1=\\[\\033[1;35m\\]\\u@sandbox\\[\\033[0m\\]:\\[\\033[1;34m\\]\\w\\[\\033[1;32m\\]\\$\\[\\033[0m\\] ',
-        `HISTFILE=/history/history-${workspaceId}`,
-        'PROMPT_COMMAND=history -a',
-        'HISTSIZE=2000',
-        'HISTFILESIZE=2000'
-      ]
+      Env: execEnv
     });
 
     // We must pass Tty: true to exec.start as well to match the base TTY configuration.
