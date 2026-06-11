@@ -58,66 +58,10 @@ function IdePage() {
   const [activeTab, setActiveTab] = useState<'output' | 'terminal'>('output');
   const [terminalKey, setTerminalKey] = useState(0); // Used to remount terminal
 
-  // States and refs for resizing UI panels (VS Code style)
-  const [sidebarWidth, setSidebarWidth] = useState(256);
-  const [editorWidth, setEditorWidth] = useState(60); // Percentage split
+  // Fixed widths for UI panels (KISS principle)
+  const sidebarWidth = 256;
+  const editorWidth = 60;
   const mainSplitRef = useRef<HTMLDivElement>(null);
-  const isResizingSidebar = useRef(false);
-  const isResizingEditor = useRef(false);
-
-  const handleSidebarResize = (e: MouseEvent) => {
-    if (!isResizingSidebar.current) return;
-    const newWidth = Math.max(160, Math.min(480, e.clientX));
-    setSidebarWidth(newWidth);
-  };
-
-  const stopSidebarResize = () => {
-    isResizingSidebar.current = false;
-    document.removeEventListener('mousemove', handleSidebarResize);
-    document.removeEventListener('mouseup', stopSidebarResize);
-    document.body.style.userSelect = '';
-  };
-
-  const startResizingSidebar = (e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizingSidebar.current = true;
-    document.addEventListener('mousemove', handleSidebarResize);
-    document.addEventListener('mouseup', stopSidebarResize);
-    document.body.style.userSelect = 'none';
-  };
-
-  const handleEditorResize = (e: MouseEvent) => {
-    if (!isResizingEditor.current || !mainSplitRef.current) return;
-    const rect = mainSplitRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const newPercentage = Math.max(20, Math.min(80, (x / rect.width) * 100));
-    setEditorWidth(newPercentage);
-  };
-
-  const stopEditorResize = () => {
-    isResizingEditor.current = false;
-    document.removeEventListener('mousemove', handleEditorResize);
-    document.removeEventListener('mouseup', stopEditorResize);
-    document.body.style.userSelect = '';
-  };
-
-  const startResizingEditor = (e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizingEditor.current = true;
-    document.addEventListener('mousemove', handleEditorResize);
-    document.addEventListener('mouseup', stopEditorResize);
-    document.body.style.userSelect = 'none';
-  };
-
-  // Cleanup resize listeners on unmount
-  useEffect(() => {
-    return () => {
-      document.removeEventListener('mousemove', handleSidebarResize);
-      document.removeEventListener('mouseup', stopSidebarResize);
-      document.removeEventListener('mousemove', handleEditorResize);
-      document.removeEventListener('mouseup', stopEditorResize);
-    };
-  }, []);
 
   const editorRef = useRef<any>(null);
   const workspaceWsProviderRef = useRef<any>(null);
@@ -545,11 +489,8 @@ function IdePage() {
               />
             </div>
 
-            {/* Sidebar Resize Handle */}
-            <div 
-              onMouseDown={startResizingSidebar}
-              className="w-[3px] hover:w-[6px] active:w-[6px] bg-white/[0.04] hover:bg-violet-500/50 active:bg-violet-500 cursor-col-resize h-full transition-all duration-150 z-30 flex-shrink-0"
-            />
+            {/* Sidebar Divider */}
+            <div className="w-[1px] bg-white/[0.06] h-full flex-shrink-0" />
 
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(13,12,20,0.95),rgba(7,6,11,0.98))]">
               <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3 sm:px-6">
@@ -670,11 +611,8 @@ function IdePage() {
                   </div>
                 </section>
 
-                {/* Editor / Output Panel Resize Handle */}
-                <div 
-                  onMouseDown={startResizingEditor}
-                  className="w-[4px] hover:w-[8px] active:w-[8px] mx-1 cursor-col-resize h-full bg-transparent hover:bg-violet-500/30 active:bg-violet-500/60 transition-all duration-150 z-30 flex-shrink-0 rounded-full"
-                />
+                {/* Static Space between Editor and Output panel */}
+                <div className="w-3 flex-shrink-0" />
 
                 <section 
                   style={{ width: `calc(${100 - editorWidth}% - 12px)` }}
