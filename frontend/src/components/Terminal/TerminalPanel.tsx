@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { TerminalSquare, WifiOff, Loader2 } from 'lucide-react';
 
@@ -11,7 +10,6 @@ interface TerminalPanelProps {
 export default function TerminalPanel({ workspaceId }: TerminalPanelProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [error, setError] = useState<string | null>(null);
@@ -20,12 +18,14 @@ export default function TerminalPanel({ workspaceId }: TerminalPanelProps) {
     if (!terminalRef.current) return;
 
     // -------------------------------------------------------------------------
-    // Initialize xterm.js terminal instance
+    // Initialize xterm.js terminal instance with static dimensions
     // -------------------------------------------------------------------------
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace",
+      rows: 30, // Static rows
+      cols: 80, // Static columns
       theme: {
         background: '#08070d',      // Match IDE dark background
         foreground: '#d4d4d8',      // zinc-300
@@ -53,43 +53,11 @@ export default function TerminalPanel({ workspaceId }: TerminalPanelProps) {
       convertEol: true
     });
 
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
     terminal.open(terminalRef.current);
-    fitAddon.fit();
 
     xtermRef.current = terminal;
-    fitAddonRef.current = fitAddon;
 
-    // -------------------------------------------------------------------------
-    // Set up ResizeObserver to handle panel resizing
-    // -------------------------------------------------------------------------
-    const resizeObserver = new ResizeObserver(() => {
-      if (fitAddonRef.current && terminalRef.current) {
-        try {
-          fitAddonRef.current.fit();
-          
-          // Send resize message to backend
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            const dims = fitAddonRef.current.proposeDimensions();
-            if (dims) {
-              const resizeMsg = JSON.stringify({
-                type: 'resize',
-                rows: dims.rows,
-                cols: dims.cols
-              });
-              wsRef.current.send(resizeMsg);
-            }
-          }
-        } catch (e) {
-          // Ignore resize errors during teardown
-        }
-      }
-    });
 
-    if (terminalRef.current) {
-      resizeObserver.observe(terminalRef.current);
-    }
 
     // -------------------------------------------------------------------------
     // Open WebSocket connection to backend terminal handler
@@ -105,19 +73,6 @@ export default function TerminalPanel({ workspaceId }: TerminalPanelProps) {
       console.log('[Terminal] WebSocket connected');
       setConnectionStatus('connected');
       setError(null);
-
-      // Send initial resize after connection
-      setTimeout(() => {
-        const dims = fitAddonRef.current?.proposeDimensions();
-        if (dims && ws.readyState === WebSocket.OPEN) {
-          const resizeMsg = JSON.stringify({
-            type: 'resize',
-            rows: dims.rows,
-            cols: dims.cols
-          });
-          ws.send(resizeMsg);
-        }
-      }, 100);
     };
 
     ws.onmessage = (event) => {
@@ -164,7 +119,6 @@ export default function TerminalPanel({ workspaceId }: TerminalPanelProps) {
     // -------------------------------------------------------------------------
     return () => {
       disposable.dispose();
-      resizeObserver.disconnect();
       
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         ws.close();
@@ -172,7 +126,6 @@ export default function TerminalPanel({ workspaceId }: TerminalPanelProps) {
       
       terminal.dispose();
       xtermRef.current = null;
-      fitAddonRef.current = null;
       wsRef.current = null;
     };
   }, [workspaceId]);

@@ -51,6 +51,25 @@ import tar from 'tar-stream';
 //
 // =============================================================================
 
+class TerminalHistoryBuffer {
+  private buffer: Buffer[] = [];
+  private totalLength = 0;
+  private maxBytes = 100 * 1024; // Keep last 100KB of terminal output
+
+  public push(chunk: Buffer) {
+    this.buffer.push(chunk);
+    this.totalLength += chunk.length;
+    while (this.totalLength > this.maxBytes && this.buffer.length > 0) {
+      const removed = this.buffer.shift()!;
+      this.totalLength -= removed.length;
+    }
+  }
+
+  public getCombined(): Buffer {
+    return Buffer.concat(this.buffer);
+  }
+}
+
 interface TerminalSession {
   ws: WebSocket;
   container: Docker.Container;
@@ -60,6 +79,9 @@ interface TerminalSession {
   workspaceId: string;
   userId: string;
   outputBuffer: OutputBuffer; // Rate limiting buffer
+  historyBuffer: TerminalHistoryBuffer; // Standard output cache
+  isReconnecting?: boolean;
+  teardownTimeout?: NodeJS.Timeout;
 }
 
 // Track active sessions to prevent multiple terminals per user-workspace
@@ -67,6 +89,9 @@ const activeSessions = new Map<string, TerminalSession>();
 
 // Idle timeout: 10 minutes of no activity → auto-close
 const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Reconnection grace period: 15 seconds to reload/reconnect
+const RECONNECT_GRACE_PERIOD_MS = 15000;
 
 // =============================================================================
 // PHASE 5: ADVANCED SECURITY — Output Rate Limiting & Audit Logging
@@ -121,6 +146,44 @@ function logAuditEvent(userId: string, workspaceId: string, event: AuditLog['eve
   
   // Console logging for real-time monitoring
   console.log(`[Audit] ${event} | User: ${userId} | Workspace: ${workspaceId}${details ? ` | ${details}` : ''}`);
+}
+
+function bindWebSocketEvents(
+  session: TerminalSession,
+  ws: WebSocket,
+  sessionKey: string
+) {
+  const resetIdleTimeout = () => {
+    clearTimeout(session.idleTimeout);
+    session.idleTimeout = setTimeout(() => {
+      console.log('[Terminal] Idle timeout reached, closing session');
+      logAuditEvent(session.userId, session.workspaceId, 'idle_timeout');
+      session.ws.close(1000, 'Idle timeout');
+    }, IDLE_TIMEOUT_MS);
+  };
+
+  ws.on('message', (data: Buffer) => {
+    resetIdleTimeout();
+
+    // Forward raw bytes directly to stdin
+    if (session.stream && !session.stream.destroyed && session.stream.writable) {
+      session.stream.write(data);
+    }
+  });
+
+  ws.on('close', async () => {
+    console.log('[Terminal] WebSocket closed, starting reconnection grace period');
+    session.isReconnecting = true;
+    session.teardownTimeout = setTimeout(async () => {
+      console.log('[Terminal] Reconnection grace period expired, cleaning up');
+      activeSessions.delete(sessionKey);
+      await cleanupSession(session);
+    }, RECONNECT_GRACE_PERIOD_MS);
+  });
+
+  ws.on('error', (err) => {
+    console.error('[Terminal] WebSocket error:', err);
+  });
 }
 
 // Expose audit logs for monitoring endpoints (future: GET /admin/terminal/audit)
@@ -226,9 +289,44 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     const sessionKey = `${userId}-${workspaceId}`;
     const existingSession = activeSessions.get(sessionKey);
     if (existingSession) {
-      console.log('[Terminal] Closing existing session for new connection');
-      await cleanupSession(existingSession);
-      activeSessions.delete(sessionKey);
+      if (existingSession.isReconnecting) {
+        console.log('[Terminal] Reconnecting to existing active session for', sessionKey);
+        if (existingSession.teardownTimeout) {
+          clearTimeout(existingSession.teardownTimeout);
+          existingSession.teardownTimeout = undefined;
+        }
+        existingSession.isReconnecting = false;
+        existingSession.ws = ws;
+
+        // Replay history
+        const history = existingSession.historyBuffer.getCombined();
+        if (history.length > 0) {
+          ws.send(history);
+        }
+
+        // Bind websocket event listeners for the new socket
+        bindWebSocketEvents(existingSession, ws, sessionKey);
+
+        // Reset the idle timeout
+        const resetIdleTimeout = () => {
+          clearTimeout(existingSession.idleTimeout);
+          existingSession.idleTimeout = setTimeout(() => {
+            console.log('[Terminal] Idle timeout reached, closing session');
+            logAuditEvent(existingSession.userId, existingSession.workspaceId, 'idle_timeout');
+            existingSession.ws.close(1000, 'Idle timeout');
+          }, IDLE_TIMEOUT_MS);
+        };
+        resetIdleTimeout();
+
+        // Log successful reconnection
+        logAuditEvent(userId, workspaceId, 'connect', 'Reconnected successfully');
+        console.log('[Terminal] Session reconnected for workspace:', workspaceId);
+        return;
+      } else {
+        console.log('[Terminal] Closing existing session for new connection');
+        await cleanupSession(existingSession);
+        activeSessions.delete(sessionKey);
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -310,17 +408,10 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     let idleTimeout = setTimeout(() => {
       console.log('[Terminal] Idle timeout reached, closing session');
       logAuditEvent(userId, workspaceId, 'idle_timeout');
-      ws.close(1000, 'Idle timeout');
+      if (session && session.ws) {
+        session.ws.close(1000, 'Idle timeout');
+      }
     }, IDLE_TIMEOUT_MS);
-
-    const resetIdleTimeout = () => {
-      clearTimeout(idleTimeout);
-      idleTimeout = setTimeout(() => {
-        console.log('[Terminal] Idle timeout reached, closing session');
-        logAuditEvent(userId, workspaceId, 'idle_timeout');
-        ws.close(1000, 'Idle timeout');
-      }, IDLE_TIMEOUT_MS);
-    };
 
     // -------------------------------------------------------------------------
     // STEP 10: Create output buffer for rate limiting
@@ -335,10 +426,10 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     const flushOutputBuffer = () => {
       if (outputBuffer.chunks.length === 0) return;
 
-      if (ws.readyState === WebSocket.OPEN) {
+      if (session && session.ws && session.ws.readyState === WebSocket.OPEN) {
         // Concatenate all buffered chunks into a single message
         const combined = Buffer.concat(outputBuffer.chunks);
-        ws.send(combined);
+        session.ws.send(combined);
       }
 
       // Reset buffer
@@ -368,6 +459,9 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       }
     };
 
+    // Create history buffer
+    const historyBuffer = new TerminalHistoryBuffer();
+
     // -------------------------------------------------------------------------
     // STEP 11: Create session object and store it
     // -------------------------------------------------------------------------
@@ -379,7 +473,8 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       idleTimeout,
       workspaceId,
       userId,
-      outputBuffer
+      outputBuffer,
+      historyBuffer
     };
     activeSessions.set(sessionKey, session);
 
@@ -387,62 +482,33 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     logAuditEvent(userId, workspaceId, 'connect', `Role: ${userRole}`);
 
     // -------------------------------------------------------------------------
-    // STEP 12: Pipe Docker stream → WebSocket (with rate limiting)
+    // STEP 12: Pipe Docker stream → WebSocket & History Buffer
     // -------------------------------------------------------------------------
     stream.on('data', (chunk: Buffer) => {
+      if (session) {
+        session.historyBuffer.push(chunk);
+      }
       bufferOutput(chunk); // Use rate-limited buffer instead of direct send
     });
 
     stream.on('end', () => {
       console.log('[Terminal] Docker stream ended');
-      ws.close(1000, 'Shell terminated');
+      if (session && session.ws) {
+        session.ws.close(1000, 'Shell terminated');
+      }
     });
 
     stream.on('error', (err) => {
       console.error('[Terminal] Docker stream error:', err);
-      ws.close(1011, 'Stream error');
-    });
-
-    // -------------------------------------------------------------------------
-    // STEP 12: Pipe WebSocket → Docker stream (with resize handling)
-    // -------------------------------------------------------------------------
-    ws.on('message', (data: Buffer) => {
-      resetIdleTimeout();
-
-      // Check if this is a resize control message (starts with '{')
-      if (data.length > 0 && data[0] === 0x7B) { // 0x7B is '{'
-        try {
-          const msg = JSON.parse(data.toString('utf8'));
-          if (msg.type === 'resize' && typeof msg.rows === 'number' && typeof msg.cols === 'number') {
-            console.log('[Terminal] Resizing PTY to', msg.cols, 'x', msg.rows);
-            exec.resize({ h: msg.rows, w: msg.cols }).catch((err) => {
-              console.error('[Terminal] Resize failed:', err);
-            });
-            return; // Don't forward resize messages to stdin
-          }
-        } catch (e) {
-          // Not valid JSON or not a resize message — treat as raw stdin
-        }
-      }
-
-      // Forward raw bytes to stdin
-      if (stream.writable) {
-        stream.write(data);
+      if (session && session.ws) {
+        session.ws.close(1011, 'Stream error');
       }
     });
 
     // -------------------------------------------------------------------------
-    // STEP 13: Handle WebSocket close
+    // STEP 13: Bind WebSocket event listeners
     // -------------------------------------------------------------------------
-    ws.on('close', async () => {
-      console.log('[Terminal] WebSocket closed');
-      activeSessions.delete(sessionKey);
-      await cleanupSession(session!);
-    });
-
-    ws.on('error', (err) => {
-      console.error('[Terminal] WebSocket error:', err);
-    });
+    bindWebSocketEvents(session, ws, sessionKey);
 
     console.log('[Terminal] Session established for workspace:', workspaceId);
 

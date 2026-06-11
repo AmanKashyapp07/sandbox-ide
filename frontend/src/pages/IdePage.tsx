@@ -721,46 +721,43 @@ function IdePage() {
                   </div>
 
                   {/* Tab Content */}
-                  {activeTab === 'output' ? (
-                    <>
-                      {/* Stdin Input Section */}
-                      <div className="border-b border-white/[0.06]">
-                        <div className="flex items-center gap-1.5 bg-white/[0.03] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">
-                          <Keyboard size={12} className="text-violet-400/70" />
-                          Input (stdin)
-                        </div>
-                        <textarea
-                          value={stdinInputs[activeFile?.id || ''] || ''}
-                          onChange={(e) => {
-                            const fileId = activeFile?.id || '';
-                            setStdinInputs((prev) => ({ ...prev, [fileId]: e.target.value }));
-                          }}
-                          disabled={userRole === 'viewer'}
-                          placeholder={userRole === 'viewer' ? "Viewers cannot enter input..." : "Enter input here (e.g. for scanf, input(), cin)..."}
-                          className="w-full resize-none border-0 bg-[rgba(7,6,11,0.95)] px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-300 placeholder:text-zinc-600 outline-none focus:bg-[rgba(13,12,20,0.95)] disabled:opacity-50"
-                          rows={3}
-                        />
-                        <div className="border-t border-white/[0.04] bg-white/[0.02] px-4 py-1.5 text-[10px] text-zinc-500">
-                          If your code reads input, add it above before running.
-                        </div>
+                  <div className={`flex flex-col min-h-0 flex-1 ${activeTab === 'output' ? '' : 'hidden'}`}>
+                    {/* Stdin Input Section */}
+                    <div className="border-b border-white/[0.06]">
+                      <div className="flex items-center gap-1.5 bg-white/[0.03] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">
+                        <Keyboard size={12} className="text-violet-400/70" />
+                        Input (stdin)
                       </div>
-                      {/* Output Display */}
-                      <div className="min-h-0 flex-1">
-                        <OutputPanel
-                          output={fileOutputs[activeFile?.id || ''] || ''}
-                          isExecuting={isExecuting}
-                          metrics={fileMetrics[activeFile?.id || '']}
-                        />
+                      <textarea
+                        value={stdinInputs[activeFile?.id || ''] || ''}
+                        onChange={(e) => {
+                          const fileId = activeFile?.id || '';
+                          setStdinInputs((prev) => ({ ...prev, [fileId]: e.target.value }));
+                        }}
+                        disabled={userRole === 'viewer'}
+                        placeholder={userRole === 'viewer' ? "Viewers cannot enter input..." : "Enter input here (e.g. for scanf, input(), cin)..."}
+                        className="w-full resize-none border-0 bg-[rgba(7,6,11,0.95)] px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-300 placeholder:text-zinc-600 outline-none focus:bg-[rgba(13,12,20,0.95)] disabled:opacity-50"
+                        rows={3}
+                      />
+                      <div className="border-t border-white/[0.04] bg-white/[0.02] px-4 py-1.5 text-[10px] text-zinc-500">
+                        If your code reads input, add it above before running.
                       </div>
-                    </>
-                  ) : (
-                    /* Terminal View */
-                    <div className="min-h-0 flex-1">
-                      {workspaceId && (
-                        <TerminalPanel key={terminalKey} workspaceId={workspaceId} />
-                      )}
                     </div>
-                  )}
+                    {/* Output Display */}
+                    <div className="min-h-0 flex-1">
+                      <OutputPanel
+                        output={fileOutputs[activeFile?.id || ''] || ''}
+                        isExecuting={isExecuting}
+                        metrics={fileMetrics[activeFile?.id || '']}
+                      />
+                    </div>
+                  </div>
+
+                  <div className={`min-h-0 flex-1 flex flex-col ${activeTab === 'terminal' ? '' : 'hidden'}`}>
+                    {workspaceId && (
+                      <TerminalPanel key={terminalKey} workspaceId={workspaceId} />
+                    )}
+                  </div>
                 </section>
               </main>
             </div>
